@@ -111,6 +111,40 @@ export default function LoginPage() {
             Sign In
           </Button>
         </form>
+
+        {/* Quick 1-Click Role Switcher for Demo / Testing */}
+        <div className="mt-6 pt-5 border-t border-border space-y-2">
+          <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider text-center">
+            Instant Demo Sign In
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setEmail('admin@markcrm.com')
+                setPassword('admin123')
+                router.push('/admin/dashboard')
+              }}
+              className="px-2.5 py-2 rounded-lg border border-border bg-surface hover:bg-slate-100 text-left transition-colors cursor-pointer"
+            >
+              <p className="text-xs font-bold text-text-primary">⚡ Admin Head</p>
+              <p className="text-[10px] text-text-muted truncate">admin@markcrm.com</p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setEmail('priya@markcrm.com')
+                setPassword('priya123')
+                router.push('/employee/dashboard')
+              }}
+              className="px-2.5 py-2 rounded-lg border border-border bg-surface hover:bg-slate-100 text-left transition-colors cursor-pointer"
+            >
+              <p className="text-xs font-bold text-text-primary">👤 Employee</p>
+              <p className="text-[10px] text-text-muted truncate">priya@markcrm.com</p>
+            </button>
+          </div>
+        </div>
       </Card>
 
       <p className="text-center text-xs text-text-muted mt-6">

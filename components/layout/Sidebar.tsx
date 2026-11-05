@@ -15,6 +15,8 @@ import {
   ChevronLeft,
   ChevronRight,
   X,
+  LogOut,
+  ArrowRightLeft,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { APP_NAME } from '@/lib/constants'
@@ -164,12 +166,62 @@ export function Sidebar({
         />
       </Suspense>
 
-      {/* Role label at bottom */}
-      {!isCollapsed && (
-        <div className="p-4 border-t border-sidebar-border">
-          <span className="text-xs text-sidebar-text uppercase tracking-wider font-medium">
-            {role === 'admin' ? '⚡ Admin Portal' : '👤 Employee Portal'}
-          </span>
+      {/* Sidebar Footer with Portal Switcher & Logout */}
+      {!isCollapsed ? (
+        <div className="p-3 border-t border-sidebar-border space-y-1.5">
+          <div className="flex items-center justify-between px-2 text-xs text-sidebar-text">
+            <span className="uppercase tracking-wider font-semibold text-[11px]">
+              {role === 'admin' ? '⚡ Admin Portal' : '👤 Employee View'}
+            </span>
+          </div>
+
+          {/* Quick Switch Button */}
+          {role === 'admin' ? (
+            <Link
+              href="/employee/dashboard"
+              onClick={onClose}
+              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-sidebar-text hover:bg-sidebar-hover hover:text-white transition-colors"
+            >
+              <ArrowRightLeft className="h-3.5 w-3.5 text-brand-400" />
+              <span>Switch to Employee View</span>
+            </Link>
+          ) : (
+            <Link
+              href="/admin/dashboard"
+              onClick={onClose}
+              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-sidebar-text hover:bg-sidebar-hover hover:text-white transition-colors"
+            >
+              <ArrowRightLeft className="h-3.5 w-3.5 text-brand-400" />
+              <span>Switch to Admin Portal</span>
+            </Link>
+          )}
+
+          {/* Direct Logout */}
+          <Link
+            href="/login"
+            onClick={onClose}
+            className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-danger/80 hover:bg-sidebar-hover hover:text-danger transition-colors"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            <span>Sign Out</span>
+          </Link>
+        </div>
+      ) : (
+        <div className="p-2 border-t border-sidebar-border flex flex-col items-center gap-2">
+          <Link
+            href={role === 'admin' ? '/employee/dashboard' : '/admin/dashboard'}
+            title={role === 'admin' ? 'Switch to Employee View' : 'Switch to Admin Portal'}
+            className="p-2 rounded-lg text-sidebar-text hover:text-white hover:bg-sidebar-hover transition-colors"
+          >
+            <ArrowRightLeft className="h-4 w-4 text-brand-400" />
+          </Link>
+          <Link
+            href="/login"
+            title="Sign Out"
+            className="p-2 rounded-lg text-danger/80 hover:text-danger hover:bg-sidebar-hover transition-colors"
+          >
+            <LogOut className="h-4 w-4" />
+          </Link>
         </div>
       )}
     </div>
