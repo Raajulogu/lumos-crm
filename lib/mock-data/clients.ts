@@ -1,0 +1,62 @@
+// lib/mock-data/clients.ts
+import type { Client } from '../types'
+
+export const mockClients: Client[] = [
+  {
+    id: 'cli-1',
+    fullName: 'Rajan Pillai',
+    companyName: 'Pillai Textiles Pvt Ltd',
+    email: 'rajan@pillaitextiles.com',
+    phone: '9444332211',
+    address: '12, Gandhi Nagar, Coimbatore, Tamil Nadu',
+    notes: 'Long-term client. Prefers weekly updates on Friday.',
+    status: 'active',
+    createdAt: '2025-02-10T10:00:00Z',
+    updatedAt: '2026-10-20T10:00:00Z',
+  },
+  {
+    id: 'cli-2',
+    fullName: 'Meena Krishnan',
+    companyName: 'FreshBite Foods',
+    email: 'meena@freshbite.in',
+    phone: '9333221100',
+    address: '45, Anna Salai, Chennai, Tamil Nadu',
+    status: 'active',
+    createdAt: '2025-05-18T10:00:00Z',
+    updatedAt: '2026-11-01T10:00:00Z',
+  },
+  {
+    id: 'cli-3',
+    fullName: 'Suresh Kumar',
+    companyName: 'BuildRight Construction',
+    email: 'suresh@buildright.co.in',
+    phone: '9222110099',
+    address: '7, MG Road, Bangalore, Karnataka',
+    status: 'active',
+    createdAt: '2025-08-01T10:00:00Z',
+    updatedAt: '2026-10-15T10:00:00Z',
+  },
+  {
+    id: 'cli-4',
+    fullName: 'Ananya Joshi',
+    companyName: 'Glow Cosmetics',
+    email: 'ananya@glowcosmetics.com',
+    phone: '9111009988',
+    status: 'active',
+    createdAt: '2026-01-20T10:00:00Z',
+    updatedAt: '2026-11-02T10:00:00Z',
+  },
+  {
+    id: 'cli-5',
+    fullName: 'Vikram Bose',
+    companyName: 'TechNova Solutions',
+    email: 'vikram@technova.io',
+    phone: '9000887766',
+    address: '22, Sector 5, Navi Mumbai, Maharashtra',
+    notes: 'Budget-conscious. Always asks for ROI data.',
+    status: 'inactive',
+    createdAt: '2025-04-10T10:00:00Z',
+    updatedAt: '2026-07-30T10:00:00Z',
+  },
+]
+

@@ -1,0 +1,67 @@
+// lib/mock-data/notifications.ts
+import type { AppNotification } from '../types'
+
+export const mockNotifications: AppNotification[] = [
+  {
+    id: 'notif-1',
+    recipientId: 'admin',
+    type: 'doubt_raised',
+    title: 'New Doubt Raised',
+    message: 'Priya Sharma raised an urgent doubt on "Pillai Textiles — SEO Q4 2026"',
+    relatedProjectId: 'proj-1',
+    read: false,
+    createdAt: '2026-11-02T11:30:00Z',
+  },
+  {
+    id: 'notif-2',
+    recipientId: 'admin',
+    type: 'deadline_reminder',
+    title: 'Deadline in 3 Days',
+    message: '"Pillai Textiles — SEO Q4 2026" is due on Nov 8, 2026.',
+    relatedProjectId: 'proj-1',
+    read: false,
+    createdAt: '2026-11-05T09:00:00Z',
+  },
+  {
+    id: 'notif-3',
+    recipientId: 'admin',
+    type: 'followup_due',
+    title: 'Follow-up Due Today',
+    message: 'Follow up with Suresh Kumar (BuildRight) about the Google Ads proposal.',
+    relatedProjectId: 'proj-3',
+    relatedClientId: 'cli-3',
+    read: false,
+    createdAt: '2026-11-05T09:00:00Z',
+  },
+  {
+    id: 'notif-4',
+    recipientId: 'admin',
+    type: 'status_changed',
+    title: 'Project Status Updated',
+    message: 'Rahul Das marked "FreshBite — Email Newsletter Setup" as Completed.',
+    relatedProjectId: 'proj-5',
+    read: true,
+    createdAt: '2026-11-02T16:00:00Z',
+  },
+  {
+    id: 'notif-5',
+    recipientId: 'emp-1',
+    type: 'doubt_replied',
+    title: 'Admin Replied to Your Doubt',
+    message: 'Admin replied to your doubt on "Pillai Textiles — SEO Q4 2026"',
+    relatedProjectId: 'proj-1',
+    read: false,
+    createdAt: '2026-11-03T09:15:00Z',
+  },
+  {
+    id: 'notif-6',
+    recipientId: 'emp-1',
+    type: 'deadline_reminder',
+    title: 'Deadline in 3 Days',
+    message: 'Your project "Pillai Textiles — SEO Q4 2026" is due on Nov 8.',
+    relatedProjectId: 'proj-1',
+    read: false,
+    createdAt: '2026-11-05T09:00:00Z',
+  },
+]
+
