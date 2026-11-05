@@ -11,12 +11,14 @@ import { MobileNav } from '@/components/layout/MobileNav'
 import { NotificationDrawer } from '@/components/common/NotificationDrawer'
 import { mockNotifications } from '@/lib/mock-data'
 import { useSidebar } from '@/hooks/useSidebar'
+import { useAuth } from '@/lib/auth-context'
 
 interface AdminLayoutProps {
   children: React.ReactNode
 }
 
 export default function AdminLayout({ children }: AdminLayoutProps) {
+  const { currentUser } = useAuth()
   const { isOpen, isCollapsed, open, close, toggleCollapse } = useSidebar()
   const [notifOpen, setNotifOpen] = useState(false)
   const [notifications, setNotifications] = useState(
@@ -48,7 +50,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <Topbar
           onMenuClick={open}
-          userName="Admin"
+          userName={currentUser.role === 'admin' ? currentUser.fullName : 'Rajesh Sharma'}
           userRole="admin"
           onNotificationClick={() => setNotifOpen(true)}
         />

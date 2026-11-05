@@ -19,6 +19,7 @@ import {
   Tabs,
   PageLoader,
 } from '@/components/ui'
+import { ProjectPipelineStepper } from '@/components/common'
 import {
   mockProjects,
   mockClients,
@@ -51,6 +52,7 @@ import {
   isOverdue,
   generateId,
 } from '@/lib/utils'
+import { useAuth } from '@/lib/auth-context'
 import type { ProjectStatus, ProjectPriority, DoubtPriority } from '@/lib/types'
 
 export default function EmployeeProjectDetailPage() {
@@ -62,12 +64,12 @@ export default function EmployeeProjectDetailPage() {
 }
 
 function EmployeeProjectDetailContent() {
+  const { currentUser } = useAuth()
   const params = useParams()
   const router = useRouter()
   const projectId = params?.id as string
 
-  // Current employee: emp-1 (Priya Sharma)
-  const currentEmpId = 'emp-1'
+  const currentEmpId = currentUser.role === 'employee' ? currentUser.id : 'emp-1'
 
   const initialProject = mockProjects.find((p) => p.id === projectId)
   const [project, setProject] = useState(initialProject)
@@ -152,7 +154,7 @@ function EmployeeProjectDetailContent() {
       projectId: project!.id,
       authorId: currentEmpId,
       authorType: 'employee' as const,
-      authorName: 'Priya Sharma',
+      authorName: currentUser.fullName || 'Employee Staff',
       content: newNote.trim(),
       createdAt: new Date().toISOString(),
     }
@@ -170,14 +172,6 @@ function EmployeeProjectDetailContent() {
     { id: 'scope', label: 'Scope & Guidelines' },
     { id: 'doubts', label: 'My Doubts & Questions', count: myDoubtsCount },
     { id: 'notes', label: 'Deliverable Notes', count: projectNotes.length },
-  ]
-
-  const statusPipeline: ProjectStatus[] = [
-    'new',
-    'in_progress',
-    'under_review',
-    'completed',
-    'delivered',
   ]
 
   return (
@@ -203,11 +197,11 @@ function EmployeeProjectDetailContent() {
         }
       />
 
-      {/* Status Pipeline Tracker */}
+      {/* Status Connected Pipeline Tracker */}
       <Card padding="md" className="mb-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
           <div>
-            <h3 className="text-sm font-semibold text-text-primary">
+            <h3 className="text-sm font-bold text-text-primary">
               Progress & Status
             </h3>
             <p className="text-xs text-text-muted mt-0.5">
@@ -221,7 +215,7 @@ function EmployeeProjectDetailContent() {
                 project.status,
               )}`}
             >
-              {getStatusLabel(project.status)}
+              Current: {getStatusLabel(project.status)}
             </span>
             <span
               className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(
@@ -233,38 +227,10 @@ function EmployeeProjectDetailContent() {
           </div>
         </div>
 
-        {/* Progress buttons */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-2">
-          {statusPipeline.map((stage, idx) => {
-            const isCurrent = project.status === stage
-            const isPast =
-              statusPipeline.indexOf(project.status) > idx || project.status === 'delivered'
-
-            return (
-              <button
-                key={stage}
-                type="button"
-                onClick={() => handleStatusChange(stage)}
-                className={`p-2.5 rounded-lg text-xs font-medium border text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-1 ${
-                  isCurrent
-                    ? 'bg-brand-600 border-brand-600 text-white shadow-sm ring-2 ring-brand-500 ring-offset-1'
-                    : isPast
-                    ? 'bg-brand-50 border-brand-200 text-brand-900 hover:bg-brand-100'
-                    : 'bg-white border-border text-text-muted hover:bg-surface hover:text-text-primary'
-                }`}
-              >
-                <div className="flex items-center gap-1">
-                  {isPast && !isCurrent ? (
-                    <Check className="h-3 w-3 text-brand-700" />
-                  ) : (
-                    <span className="text-[10px] opacity-70">Step {idx + 1}</span>
-                  )}
-                </div>
-                <span>{getStatusLabel(stage)}</span>
-              </button>
-            )
-          })}
-        </div>
+        <ProjectPipelineStepper
+          currentStatus={project.status}
+          onStatusChange={handleStatusChange}
+        />
       </Card>
 
       {/* Deadline & Client Info Bar */}

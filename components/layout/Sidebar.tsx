@@ -2,7 +2,7 @@
 
 // components/layout/Sidebar.tsx
 import { Suspense } from 'react'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   LayoutDashboard,
@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { APP_NAME } from '@/lib/constants'
+import { useAuth } from '@/lib/auth-context'
 
 const ICON_MAP = {
   LayoutDashboard,
@@ -110,7 +111,26 @@ export function Sidebar({
   isOpen = false,
   onClose,
 }: SidebarProps) {
+  const router = useRouter()
+  const { currentUser, logout, loginAs } = useAuth()
   const navItems = role === 'admin' ? ADMIN_NAV : EMPLOYEE_NAV
+
+  function handleLogout() {
+    if (onClose) onClose()
+    logout()
+    router.push('/login')
+  }
+
+  function handleSwitchToOppositePortal() {
+    if (onClose) onClose()
+    if (role === 'admin') {
+      loginAs('emp-1')
+      router.push('/employee/dashboard')
+    } else {
+      loginAs('admin')
+      router.push('/admin/dashboard')
+    }
+  }
 
   const sidebarContent = (
     <div
@@ -127,9 +147,14 @@ export function Sidebar({
         )}
       >
         {!isCollapsed && (
-          <span className="text-white font-bold text-lg tracking-tight">
-            {APP_NAME}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-white font-bold text-lg tracking-tight">
+              {APP_NAME}
+            </span>
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-brand-900/60 text-brand-300 border border-brand-700/50">
+              Agency OS
+            </span>
+          </div>
         )}
         {/* Mobile close button */}
         {onClose && (
@@ -166,62 +191,62 @@ export function Sidebar({
         />
       </Suspense>
 
-      {/* Sidebar Footer with Portal Switcher & Logout */}
+      {/* Sidebar Footer with Active Persona Card, Portal Switcher & Logout */}
       {!isCollapsed ? (
-        <div className="p-3 border-t border-sidebar-border space-y-1.5">
-          <div className="flex items-center justify-between px-2 text-xs text-sidebar-text">
-            <span className="uppercase tracking-wider font-semibold text-[11px]">
-              {role === 'admin' ? '⚡ Admin Portal' : '👤 Employee View'}
-            </span>
+        <div className="p-3 border-t border-sidebar-border space-y-2">
+          {/* Active User Indicator */}
+          <div className="px-2 py-1.5 rounded-lg bg-sidebar-hover/60 border border-sidebar-border/40">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-sidebar-text/80">
+              Logged in as
+            </p>
+            <p className="text-xs font-bold text-white truncate">
+              {currentUser.fullName}
+            </p>
+            <p className="text-[10px] text-brand-300 truncate">
+              {currentUser.designation}
+            </p>
           </div>
 
           {/* Quick Switch Button */}
-          {role === 'admin' ? (
-            <Link
-              href="/employee/dashboard"
-              onClick={onClose}
-              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-sidebar-text hover:bg-sidebar-hover hover:text-white transition-colors"
-            >
-              <ArrowRightLeft className="h-3.5 w-3.5 text-brand-400" />
-              <span>Switch to Employee View</span>
-            </Link>
-          ) : (
-            <Link
-              href="/admin/dashboard"
-              onClick={onClose}
-              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-sidebar-text hover:bg-sidebar-hover hover:text-white transition-colors"
-            >
-              <ArrowRightLeft className="h-3.5 w-3.5 text-brand-400" />
-              <span>Switch to Admin Portal</span>
-            </Link>
-          )}
+          <button
+            type="button"
+            onClick={handleSwitchToOppositePortal}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-sidebar-text hover:bg-sidebar-hover hover:text-white transition-colors cursor-pointer text-left"
+          >
+            <ArrowRightLeft className="h-3.5 w-3.5 text-brand-400" />
+            <span>
+              {role === 'admin' ? 'Switch to Employee View' : 'Switch to Admin Portal'}
+            </span>
+          </button>
 
           {/* Direct Logout */}
-          <Link
-            href="/login"
-            onClick={onClose}
-            className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-danger/80 hover:bg-sidebar-hover hover:text-danger transition-colors"
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-danger/80 hover:bg-sidebar-hover hover:text-danger transition-colors cursor-pointer text-left"
           >
             <LogOut className="h-3.5 w-3.5" />
             <span>Sign Out</span>
-          </Link>
+          </button>
         </div>
       ) : (
         <div className="p-2 border-t border-sidebar-border flex flex-col items-center gap-2">
-          <Link
-            href={role === 'admin' ? '/employee/dashboard' : '/admin/dashboard'}
+          <button
+            type="button"
+            onClick={handleSwitchToOppositePortal}
             title={role === 'admin' ? 'Switch to Employee View' : 'Switch to Admin Portal'}
-            className="p-2 rounded-lg text-sidebar-text hover:text-white hover:bg-sidebar-hover transition-colors"
+            className="p-2 rounded-lg text-sidebar-text hover:text-white hover:bg-sidebar-hover transition-colors cursor-pointer"
           >
             <ArrowRightLeft className="h-4 w-4 text-brand-400" />
-          </Link>
-          <Link
-            href="/login"
+          </button>
+          <button
+            type="button"
+            onClick={handleLogout}
             title="Sign Out"
-            className="p-2 rounded-lg text-danger/80 hover:text-danger hover:bg-sidebar-hover transition-colors"
+            className="p-2 rounded-lg text-danger/80 hover:text-danger hover:bg-sidebar-hover transition-colors cursor-pointer"
           >
             <LogOut className="h-4 w-4" />
-          </Link>
+          </button>
         </div>
       )}
     </div>

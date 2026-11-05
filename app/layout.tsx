@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { APP_NAME, APP_TAGLINE } from "@/lib/constants";
+import { AuthProvider } from "@/lib/auth-context";
 
 export const metadata: Metadata = {
   title: `${APP_NAME} — ${APP_TAGLINE}`,
@@ -14,8 +15,8 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="h-full antialiased">
-      <body className="min-h-full flex flex-col bg-surface text-text-primary">
-        {children}
+      <body className="min-h-full flex flex-col bg-slate-50 text-slate-900 font-sans">
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   );

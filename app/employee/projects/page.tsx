@@ -22,6 +22,7 @@ import {
   ChevronRight,
   Clock,
 } from 'lucide-react'
+import { useAuth } from '@/lib/auth-context'
 import {
   formatDate,
   getStatusLabel,
@@ -41,8 +42,8 @@ export default function EmployeeProjectsPage() {
 }
 
 function EmployeeProjectsContent() {
-  // Current employee: emp-1 (Priya Sharma)
-  const currentEmpId = 'emp-1'
+  const { currentUser } = useAuth()
+  const currentEmpId = currentUser.role === 'employee' ? currentUser.id : 'emp-1'
 
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
@@ -116,11 +117,18 @@ function EmployeeProjectsContent() {
     return filteredProjects.slice(start, start + itemsPerPage)
   }, [filteredProjects, currentPage, itemsPerPage])
 
+  const activeStaffName = currentUser.role === 'employee' ? currentUser.fullName : 'Priya Sharma'
+  const activeStaffRole = currentUser.role === 'employee' ? currentUser.designation : 'SEO Specialist'
+
   return (
     <ContentWrapper>
       <PageHeader
         title="My Assigned Projects"
-        description="Review work orders, track deadlines, and submit milestone updates."
+        description={`Work assignments for ${activeStaffName} (${activeStaffRole}). Client contact details and financial margins are restricted.`}
+        breadcrumbs={[
+          { label: 'Dashboard', href: '/employee/dashboard' },
+          { label: 'My Projects' },
+        ]}
       />
 
       {/* Highlights */}

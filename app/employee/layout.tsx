@@ -1,26 +1,32 @@
 'use client'
 
-// app/(employee)/layout.tsx
-// Dashboard shell layout for the employee portal.
+// app/employee/layout.tsx
+// Dashboard shell layout for the employee portal with dynamic active employee context.
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { Topbar } from '@/components/layout/Topbar'
 import { MobileNav } from '@/components/layout/MobileNav'
 import { NotificationDrawer } from '@/components/common/NotificationDrawer'
 import { mockNotifications } from '@/lib/mock-data'
 import { useSidebar } from '@/hooks/useSidebar'
+import { useAuth } from '@/lib/auth-context'
 
 interface EmployeeLayoutProps {
   children: React.ReactNode
 }
 
 export default function EmployeeLayout({ children }: EmployeeLayoutProps) {
+  const { currentUser } = useAuth()
   const { isOpen, isCollapsed, open, close, toggleCollapse } = useSidebar()
   const [notifOpen, setNotifOpen] = useState(false)
-  const [notifications, setNotifications] = useState(
-    mockNotifications.filter((n) => n.recipientId === 'emp-1'),
-  )
+
+  // Current employee notifications
+  const userNotifications = useMemo(() => {
+    return mockNotifications.filter((n) => n.recipientId === currentUser.id)
+  }, [currentUser.id])
+
+  const [notifications, setNotifications] = useState(userNotifications)
 
   function handleMarkRead(id: string) {
     setNotifications((prev) =>
@@ -33,7 +39,7 @@ export default function EmployeeLayout({ children }: EmployeeLayoutProps) {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-surface">
+    <div className="flex h-screen overflow-hidden bg-slate-50">
       <Sidebar
         role="employee"
         isCollapsed={isCollapsed}
@@ -45,7 +51,7 @@ export default function EmployeeLayout({ children }: EmployeeLayoutProps) {
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <Topbar
           onMenuClick={open}
-          userName="Priya Sharma"
+          userName={currentUser.role === 'employee' ? currentUser.fullName : 'Priya Sharma'}
           userRole="employee"
           onNotificationClick={() => setNotifOpen(true)}
         />
@@ -67,4 +73,3 @@ export default function EmployeeLayout({ children }: EmployeeLayoutProps) {
     </div>
   )
 }
-

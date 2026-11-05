@@ -19,6 +19,7 @@ import {
   Tabs,
   PageLoader,
 } from '@/components/ui'
+import { ProjectPipelineStepper } from '@/components/common'
 import {
   mockProjects,
   mockClients,
@@ -134,15 +135,6 @@ function AdminProjectDetailContent() {
       </ContentWrapper>
     )
   }
-
-  // Status progression stages
-  const statusPipeline: ProjectStatus[] = [
-    'new',
-    'in_progress',
-    'under_review',
-    'completed',
-    'delivered',
-  ]
 
   // Update Status
   function handleStatusChange(newStatus: ProjectStatus) {
@@ -291,11 +283,11 @@ function AdminProjectDetailContent() {
         }
       />
 
-      {/* 5-Stage Status Interactive Pipeline */}
+      {/* 5-Stage Status Interactive Connected Pipeline */}
       <Card padding="md" className="mb-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
           <div>
-            <h3 className="text-sm font-semibold text-text-primary">
+            <h3 className="text-sm font-bold text-text-primary">
               Project Lifecycle Stage
             </h3>
             <p className="text-xs text-text-muted mt-0.5">
@@ -321,38 +313,10 @@ function AdminProjectDetailContent() {
           </div>
         </div>
 
-        {/* Pipeline Bar */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-2">
-          {statusPipeline.map((stage, idx) => {
-            const isCurrent = project.status === stage
-            const isPast =
-              statusPipeline.indexOf(project.status) > idx || project.status === 'delivered'
-
-            return (
-              <button
-                key={stage}
-                type="button"
-                onClick={() => handleStatusChange(stage)}
-                className={`p-2.5 rounded-lg text-xs font-medium border text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-1 ${
-                  isCurrent
-                    ? 'bg-brand-600 border-brand-600 text-white shadow-sm ring-2 ring-brand-500 ring-offset-1'
-                    : isPast
-                    ? 'bg-brand-50 border-brand-200 text-brand-900 hover:bg-brand-100'
-                    : 'bg-white border-border text-text-muted hover:bg-surface hover:text-text-primary'
-                }`}
-              >
-                <div className="flex items-center gap-1">
-                  {isPast && !isCurrent ? (
-                    <Check className="h-3 w-3 text-brand-700" />
-                  ) : (
-                    <span className="text-[10px] opacity-70">Step {idx + 1}</span>
-                  )}
-                </div>
-                <span>{getStatusLabel(stage)}</span>
-              </button>
-            )
-          })}
-        </div>
+        <ProjectPipelineStepper
+          currentStatus={project.status}
+          onStatusChange={handleStatusChange}
+        />
       </Card>
 
       {/* Metric Cards: Budget, Cost, Profit, Deadline */}

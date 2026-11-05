@@ -4,7 +4,6 @@
 // Employee Follow-ups — Personal follow-up agenda with quick completion toggle.
 
 import { useState, useMemo, Suspense } from 'react'
-import Link from 'next/link'
 import { ContentWrapper } from '@/components/layout/ContentWrapper'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Card, Badge, Button, EmptyState, PageLoader } from '@/components/ui'
@@ -14,12 +13,9 @@ import {
   mockClients,
   mockProjects,
 } from '@/lib/mock-data'
+import { useAuth } from '@/lib/auth-context'
 import {
   Phone,
-  Clock,
-  CheckCircle2,
-  Building2,
-  Briefcase,
   Check,
   RotateCcw,
 } from 'lucide-react'
@@ -35,11 +31,20 @@ export default function EmployeeFollowUpsPage() {
 }
 
 function EmployeeFollowUpsContent() {
-  const currentEmpId = 'emp-1'
+  const { currentUser } = useAuth()
+  const currentEmpId = currentUser.role === 'employee' ? currentUser.id : 'emp-1'
 
-  const [followups, setFollowups] = useState(
-    mockFollowUps.filter((f) => f.assignedToId === currentEmpId),
-  )
+  const [statusOverrides, setStatusOverrides] = useState<Record<string, FollowUpStatus>>({})
+
+  const followups = useMemo(() => {
+    return mockFollowUps
+      .filter((f) => f.assignedToId === currentEmpId)
+      .map((item) => ({
+        ...item,
+        status: statusOverrides[item.id] ?? item.status,
+      }))
+  }, [currentEmpId, statusOverrides])
+
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [currentPage, setCurrentPage] = useState(1)
@@ -56,15 +61,11 @@ function EmployeeFollowUpsContent() {
   const projectMap = useMemo(() => new Map(mockProjects.map((p) => [p.id, p])), [])
 
   function toggleStatus(id: string) {
-    setFollowups((prev) =>
-      prev.map((item) => {
-        if (item.id === id) {
-          const nextStatus: FollowUpStatus = item.status === 'done' ? 'pending' : 'done'
-          return { ...item, status: nextStatus }
-        }
-        return item
-      }),
-    )
+    setStatusOverrides((prev) => {
+      const current = prev[id] ?? mockFollowUps.find((f) => f.id === id)?.status ?? 'pending'
+      const nextStatus: FollowUpStatus = current === 'done' ? 'pending' : 'done'
+      return { ...prev, [id]: nextStatus }
+    })
   }
 
   const filteredFollowups = useMemo(() => {
@@ -101,11 +102,17 @@ function EmployeeFollowUpsContent() {
     { id: 'done', label: 'Completed', count: doneCount },
   ]
 
+  const activeStaffName = currentUser.role === 'employee' ? currentUser.fullName : 'Priya Sharma'
+
   return (
     <ContentWrapper>
       <PageHeader
         title="My Client Follow-ups"
-        description="Assigned check-ins, client communications, and callback reminders."
+        description={`Follow-up calls and scheduled communications assigned to ${activeStaffName}.`}
+        breadcrumbs={[
+          { label: 'Dashboard', href: '/employee/dashboard' },
+          { label: 'Follow-ups' },
+        ]}
       />
 
       {/* Filter and Search Bar */}

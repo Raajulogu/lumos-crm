@@ -17,6 +17,7 @@ import {
   Phone,
   ArrowRight,
 } from 'lucide-react'
+import { useAuth } from '@/lib/auth-context'
 import {
   formatDate,
   getStatusLabel,
@@ -36,8 +37,9 @@ export default function EmployeeDashboardPage() {
 }
 
 function EmployeeDashboardContent() {
-  // Mock current employee is emp-1 (Priya Sharma)
-  const currentEmpId = 'emp-1'
+  const { currentUser, loginAs } = useAuth()
+  const currentEmpId = currentUser.role === 'employee' ? currentUser.id : 'emp-1'
+  const isDemoAdminPreview = currentUser.role === 'admin'
 
   // Filter projects assigned to this employee (primary or member)
   const myProjects = mockProjects.filter(
@@ -105,16 +107,49 @@ function EmployeeDashboardContent() {
     mockClients.map((c) => [c.id, { name: c.fullName, company: c.companyName }]),
   )
 
+  const activeEmployeeName = isDemoAdminPreview ? 'Priya Sharma' : currentUser.fullName
+  const activeEmployeeRole = isDemoAdminPreview ? 'Senior SEO & Content Lead' : currentUser.designation
+
   return (
     <ContentWrapper>
+      {/* Administrator Preview Mode Notice */}
+      {isDemoAdminPreview && (
+        <div className="mb-4 p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-xs flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <span className="font-bold uppercase tracking-wider text-[10px] bg-blue-200 text-blue-900 px-2 py-0.5 rounded-full">
+              Admin Preview
+            </span>
+            <span>
+              You are previewing employee portal as <strong>Priya Sharma (SEO Lead)</strong>.
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => loginAs('emp-2')}
+              className="text-blue-700 hover:text-blue-900 font-semibold underline cursor-pointer"
+            >
+              Switch to Arjun Mehta (Ads Lead)
+            </button>
+            <span className="text-blue-300">•</span>
+            <Link
+              href="/admin/dashboard"
+              className="text-blue-700 hover:text-blue-900 font-semibold underline"
+            >
+              Back to Admin Portal
+            </Link>
+          </div>
+        </div>
+      )}
+
       <PageHeader
-        title="My Dashboard"
-        description="Welcome back, Priya! Here are your active projects and tasks."
+        title={isDemoAdminPreview ? 'Staff Workspace' : `Welcome, ${activeEmployeeName}!`}
+        description={`${activeEmployeeRole} • Active assignments, deadline tracking, and client doubts.`}
         action={
           <Link href="/employee/projects">
             <Button variant="primary" size="sm">
               <Briefcase className="h-4 w-4" />
-              View All Projects
+              <span>My Projects</span>
             </Button>
           </Link>
         }
