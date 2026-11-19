@@ -66,7 +66,7 @@ function EmployeeProjectDetailContent() {
   const router = useRouter()
   const projectId = params?.id as string
 
-  const currentEmpId = currentUser.role === 'employee' ? currentUser.id : 'emp-1'
+  const currentEmpId = currentUser.id || ''
 
   const [loading, setLoading] = useState(true)
   const [project, setProject] = useState<Project | null>(null)

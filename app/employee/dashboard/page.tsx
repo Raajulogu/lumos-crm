@@ -50,9 +50,7 @@ export default function EmployeeDashboardPage() {
 }
 
 function EmployeeDashboardContent() {
-  const { currentUser, loginAs } = useAuth()
-  const currentEmpId = currentUser.role === 'employee' ? currentUser.id : 'emp-1'
-  const isDemoAdminPreview = currentUser.role === 'admin'
+  const { currentUser } = useAuth()
 
   const [projects, setProjects] = useState<Project[]>([])
   const [clients, setClients] = useState<Client[]>([])
@@ -96,16 +94,10 @@ function EmployeeDashboardContent() {
     }
   }, [])
 
-  // Filter projects assigned to this employee (if employee token, backend already filters)
+  // Assigned projects from backend (backend automatically scopes to logged-in employee)
   const myProjects = useMemo(() => {
-    return (Array.isArray(projects) ? projects : []).filter(
-      (p) =>
-        !p ? false :
-        p.primaryEmployeeId === currentEmpId ||
-        (Array.isArray(p.additionalMemberIds) && p.additionalMemberIds.includes(currentEmpId)) ||
-        isDemoAdminPreview,
-    )
-  }, [projects, currentEmpId, isDemoAdminPreview])
+    return Array.isArray(projects) ? projects : []
+  }, [projects])
 
   const activeProjects = useMemo(
     () => myProjects.filter((p) => p && p.status !== 'delivered'),
@@ -126,14 +118,8 @@ function EmployeeDashboardContent() {
   )
 
   const myFollowUps = useMemo(
-    () =>
-      (Array.isArray(followups) ? followups : []).filter(
-        (f) =>
-          !f ? false :
-          (f.assignedToId === currentEmpId || isDemoAdminPreview) &&
-          f.status === 'pending',
-      ),
-    [followups, currentEmpId, isDemoAdminPreview],
+    () => (Array.isArray(followups) ? followups.filter((f) => f && f.status === 'pending') : []),
+    [followups],
   )
 
   const statCards = [
@@ -176,45 +162,13 @@ function EmployeeDashboardContent() {
     [clients],
   )
 
-  const activeEmployeeName = isDemoAdminPreview ? 'Priya Sharma' : currentUser.fullName
-  const activeEmployeeRole = isDemoAdminPreview
-    ? 'Senior SEO & Content Lead'
-    : currentUser.designation
+  const activeEmployeeName = currentUser.fullName || 'Team Member'
+  const activeEmployeeRole = currentUser.designation || 'Specialist'
 
   return (
     <ContentWrapper>
-      {/* Administrator Preview Mode Notice */}
-      {isDemoAdminPreview && (
-        <div className="mb-4 p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-xs flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <span className="font-bold uppercase tracking-wider text-[10px] bg-blue-200 text-blue-900 px-2 py-0.5 rounded-full">
-              Admin Preview
-            </span>
-            <span>
-              You are previewing employee portal as <strong>Priya Sharma (SEO Lead)</strong>.
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => loginAs('emp-2')}
-              className="text-blue-700 hover:text-blue-900 font-semibold underline cursor-pointer"
-            >
-              Switch to Arjun Mehta (Ads Lead)
-            </button>
-            <span className="text-blue-300">•</span>
-            <Link
-              href="/admin/dashboard"
-              className="text-blue-700 hover:text-blue-900 font-semibold underline"
-            >
-              Back to Admin Portal
-            </Link>
-          </div>
-        </div>
-      )}
-
       <PageHeader
-        title={isDemoAdminPreview ? 'Staff Workspace' : `Welcome, ${activeEmployeeName}!`}
+        title={`Welcome, ${activeEmployeeName}!`}
         description={`${activeEmployeeRole} • Active assignments, deadline tracking, and client doubts.`}
         action={
           <Link href="/employee/projects">

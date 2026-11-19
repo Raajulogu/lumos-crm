@@ -16,7 +16,6 @@ import {
   ChevronRight,
   X,
   LogOut,
-  ArrowRightLeft,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { APP_NAME } from '@/lib/constants'
@@ -112,24 +111,13 @@ export function Sidebar({
   onClose,
 }: SidebarProps) {
   const router = useRouter()
-  const { currentUser, logout, loginAs } = useAuth()
+  const { currentUser, logout } = useAuth()
   const navItems = role === 'admin' ? ADMIN_NAV : EMPLOYEE_NAV
 
   function handleLogout() {
     if (onClose) onClose()
     logout()
     router.push('/login')
-  }
-
-  function handleSwitchToOppositePortal() {
-    if (onClose) onClose()
-    if (role === 'admin') {
-      loginAs('emp-1')
-      router.push('/employee/dashboard')
-    } else {
-      loginAs('admin')
-      router.push('/admin/dashboard')
-    }
   }
 
   const sidebarContent = (
@@ -191,7 +179,7 @@ export function Sidebar({
         />
       </Suspense>
 
-      {/* Sidebar Footer with Active Persona Card, Portal Switcher & Logout */}
+      {/* Sidebar Footer with Active User Card & Logout */}
       {!isCollapsed ? (
         <div className="p-3 border-t border-sidebar-border space-y-2">
           {/* Active User Indicator */}
@@ -207,38 +195,18 @@ export function Sidebar({
             </p>
           </div>
 
-          {/* Quick Switch Button */}
-          <button
-            type="button"
-            onClick={handleSwitchToOppositePortal}
-            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-sidebar-text hover:bg-sidebar-hover hover:text-white transition-colors cursor-pointer text-left"
-          >
-            <ArrowRightLeft className="h-3.5 w-3.5 text-brand-400" />
-            <span>
-              {role === 'admin' ? 'Switch to Employee View' : 'Switch to Admin Portal'}
-            </span>
-          </button>
-
           {/* Direct Logout */}
           <button
             type="button"
             onClick={handleLogout}
-            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-danger/80 hover:bg-sidebar-hover hover:text-danger transition-colors cursor-pointer text-left"
+            className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-medium text-danger/80 hover:bg-sidebar-hover hover:text-danger transition-colors cursor-pointer text-left"
           >
-            <LogOut className="h-3.5 w-3.5" />
+            <LogOut className="h-4 w-4" />
             <span>Sign Out</span>
           </button>
         </div>
       ) : (
         <div className="p-2 border-t border-sidebar-border flex flex-col items-center gap-2">
-          <button
-            type="button"
-            onClick={handleSwitchToOppositePortal}
-            title={role === 'admin' ? 'Switch to Employee View' : 'Switch to Admin Portal'}
-            className="p-2 rounded-lg text-sidebar-text hover:text-white hover:bg-sidebar-hover transition-colors cursor-pointer"
-          >
-            <ArrowRightLeft className="h-4 w-4 text-brand-400" />
-          </button>
           <button
             type="button"
             onClick={handleLogout}

@@ -36,8 +36,6 @@ export default function EmployeeFollowUpsPage() {
 
 function EmployeeFollowUpsContent() {
   const { currentUser } = useAuth()
-  const currentEmpId = currentUser.role === 'employee' ? currentUser.id : 'emp-1'
-  const isDemoAdminPreview = currentUser.role === 'admin'
 
   const [followups, setFollowups] = useState<FollowUp[]>([])
   const [clients, setClients] = useState<Client[]>([])
@@ -91,26 +89,27 @@ function EmployeeFollowUpsContent() {
   const clientMap = useMemo(
     () =>
       new Map(
-        clients.map((c) => [c.id, { name: c.fullName, company: c.companyName }]),
+        (Array.isArray(clients) ? clients : []).map((c) => [c.id || (c as any)._id, { name: c.fullName, company: c.companyName }]),
       ),
     [clients],
   )
-  const projectMap = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects])
+  const projectMap = useMemo(
+    () => new Map((Array.isArray(projects) ? projects : []).map((p) => [p.id || (p as any)._id, p])),
+    [projects],
+  )
 
-  // My followups
+  // Assigned follow-ups from backend
   const myFollowups = useMemo(() => {
-    return followups.filter(
-      (f) => f.assignedToId === currentEmpId || isDemoAdminPreview,
-    )
-  }, [followups, currentEmpId, isDemoAdminPreview])
+    return Array.isArray(followups) ? followups : []
+  }, [followups])
 
   async function toggleStatus(id: string) {
-    const fu = myFollowups.find((f) => f.id === id)
+    const fu = myFollowups.find((f) => (f.id || (f as any)._id) === id)
     if (!fu) return
 
     const nextStatus: FollowUpStatus = fu.status === 'done' ? 'pending' : 'done'
     setFollowups((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, status: nextStatus } : item)),
+      prev.map((item) => ((item.id || (item as any)._id) === id ? { ...item, status: nextStatus } : item)),
     )
 
     try {
@@ -120,13 +119,18 @@ function EmployeeFollowUpsContent() {
 
   const filteredFollowups = useMemo(() => {
     return myFollowups.filter((item) => {
-      const client = clientMap.get(item.clientId)
-      const proj = projectMap.get(item.projectId)
+      const client = (item as any).client || clientMap.get(item.clientId)
+      const proj = (item as any).project || projectMap.get(item.projectId)
+      const query = (search || '').toLowerCase()
+
+      const companyName = client?.company || client?.companyName || (item as any).clientName || ''
+      const projectName = proj?.name || (item as any).projectName || ''
+      const notes = item.notes || ''
 
       const matchesSearch =
-        (client?.company.toLowerCase().includes(search.toLowerCase()) ?? false) ||
-        (proj?.name.toLowerCase().includes(search.toLowerCase()) ?? false) ||
-        (item.notes?.toLowerCase().includes(search.toLowerCase()) ?? false)
+        companyName.toLowerCase().includes(query) ||
+        projectName.toLowerCase().includes(query) ||
+        notes.toLowerCase().includes(query)
 
       let matchesStatus = true
       if (statusFilter === 'all') matchesStatus = true

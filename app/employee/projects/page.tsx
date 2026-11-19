@@ -49,8 +49,6 @@ export default function EmployeeProjectsPage() {
 
 function EmployeeProjectsContent() {
   const { currentUser } = useAuth()
-  const currentEmpId = currentUser.role === 'employee' ? currentUser.id : 'emp-1'
-  const isDemoAdminPreview = currentUser.role === 'admin'
 
   const [projects, setProjects] = useState<Project[]>([])
   const [clients, setClients] = useState<Client[]>([])
@@ -115,16 +113,10 @@ function EmployeeProjectsContent() {
     [categories],
   )
 
-  // My assigned projects only
+  // Assigned projects from backend (backend already scopes projects to current employee token)
   const myAllProjects = useMemo(() => {
-    return (Array.isArray(projects) ? projects : []).filter(
-      (p) =>
-        !p ? false :
-        p.primaryEmployeeId === currentEmpId ||
-        (Array.isArray(p.additionalMemberIds) && p.additionalMemberIds.includes(currentEmpId)) ||
-        isDemoAdminPreview,
-    )
-  }, [projects, currentEmpId, isDemoAdminPreview])
+    return Array.isArray(projects) ? projects : []
+  }, [projects])
 
   // Filtered dataset
   const filteredProjects = useMemo(() => {

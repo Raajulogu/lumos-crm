@@ -14,28 +14,12 @@ export interface UserSession {
   mustChangePassword?: boolean
 }
 
-export const DEMO_USERS: Record<string, UserSession> = {
-  admin: {
-    id: 'admin',
-    fullName: 'Rajesh Sharma',
-    email: 'admin@markcrm.com',
-    role: 'admin',
-    designation: 'Agency Director & Head',
-  },
-  'emp-1': {
-    id: 'emp-1',
-    fullName: 'Priya Sharma',
-    email: 'priya@markcrm.com',
-    role: 'employee',
-    designation: 'Senior SEO & Content Lead',
-  },
-  'emp-2': {
-    id: 'emp-2',
-    fullName: 'Arjun Mehta',
-    email: 'arjun@markcrm.com',
-    role: 'employee',
-    designation: 'Performance Ads & Social Lead',
-  },
+export const EMPTY_USER: UserSession = {
+  id: '',
+  fullName: '',
+  email: '',
+  role: 'employee',
+  designation: '',
 }
 
 interface AuthContextType {
@@ -44,34 +28,28 @@ interface AuthContextType {
   isLoading: boolean
   setCurrentUser: (user: UserSession) => void
   login: (credentials: { email: string; password: string }) => Promise<UserSession>
-  loginWithCredentials: (email: string) => UserSession | null
-  loginAs: (userKey: 'admin' | 'emp-1' | 'emp-2') => void
   logout: () => Promise<void>
 }
 
-const DEFAULT_USER = DEMO_USERS['admin']
-
 const AuthContext = createContext<AuthContextType>({
-  currentUser: DEFAULT_USER,
+  currentUser: EMPTY_USER,
   isAuthenticated: false,
   isLoading: true,
   setCurrentUser: () => {},
-  login: async () => DEFAULT_USER,
-  loginWithCredentials: () => null,
-  loginAs: () => {},
+  login: async () => EMPTY_USER,
   logout: async () => {},
 })
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [currentUser, setCurrentUserState] = useState<UserSession>(() => {
-    if (typeof window === 'undefined') return DEFAULT_USER
+    if (typeof window === 'undefined') return EMPTY_USER
     try {
       const stored = localStorage.getItem('crm_active_user')
       if (stored) {
         return JSON.parse(stored)
       }
     } catch {}
-    return DEFAULT_USER
+    return EMPTY_USER
   })
 
   const [isLoading, setIsLoading] = useState(true)
@@ -158,35 +136,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [],
   )
 
-  // Demo / fallback credential matcher
-  const loginWithCredentials = useCallback((email: string): UserSession | null => {
-    const clean = email.trim().toLowerCase()
-    let matched: UserSession | null = null
-    if (clean.includes('admin')) {
-      matched = DEMO_USERS['admin']
-    } else if (clean.includes('arjun')) {
-      matched = DEMO_USERS['emp-2']
-    } else if (clean.includes('priya')) {
-      matched = DEMO_USERS['emp-1']
-    }
-
-    if (matched) {
-      setCurrentUserState(matched)
-      setIsAuthenticated(true)
-      localStorage.setItem('crm_active_user', JSON.stringify(matched))
-    }
-    return matched
-  }, [])
-
-  const loginAs = useCallback((userKey: 'admin' | 'emp-1' | 'emp-2') => {
-    const user = DEMO_USERS[userKey]
-    if (user) {
-      setCurrentUserState(user)
-      setIsAuthenticated(true)
-      localStorage.setItem('crm_active_user', JSON.stringify(user))
-    }
-  }, [])
-
   const logout = useCallback(async () => {
     try {
       await api.auth.logout()
@@ -206,8 +155,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         setCurrentUser,
         login,
-        loginWithCredentials,
-        loginAs,
         logout,
       }}
     >
