@@ -3,18 +3,24 @@
 // app/admin/employees/[id]/page.tsx
 // Employee Profile & Performance Metrics — Workload distribution, on-time delivery KPIs, and account management.
 
-import { useState, useMemo, Suspense } from 'react'
+import { useState, useMemo, useEffect, Suspense } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ContentWrapper } from '@/components/layout/ContentWrapper'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { Card, CardHeader, Badge, Button, Avatar, Toggle, PageLoader } from '@/components/ui'
 import {
-  mockEmployees,
-  mockProjects,
-  mockClients,
-  mockDoubts,
-} from '@/lib/mock-data'
+  Card,
+  CardHeader,
+  Badge,
+  Button,
+  Avatar,
+  Toggle,
+  PageLoader,
+  CardSkeleton,
+  TableSkeleton,
+} from '@/components/ui'
+import { api } from '@/lib/api'
+import type { Employee, Project, Client, Doubt } from '@/lib/types'
 import {
   User,
   Mail,
@@ -29,6 +35,7 @@ import {
   ChevronRight,
   TrendingUp,
   Award,
+  AlertCircle,
 } from 'lucide-react'
 import {
   formatDate,
@@ -53,23 +60,72 @@ function AdminEmployeeDetailContent() {
   const router = useRouter()
   const empId = params?.id as string
 
-  const initialEmp = mockEmployees.find((e) => e.id === empId)
-  const [employee, setEmployee] = useState(initialEmp)
+  const [loading, setLoading] = useState(true)
+  const [employee, setEmployee] = useState<Employee | null>(null)
+  const [projects, setProjects] = useState<Project[]>([])
+  const [clients, setClients] = useState<Client[]>([])
+  const [doubts, setDoubts] = useState<Doubt[]>([])
+
+  useEffect(() => {
+    let mounted = true
+    setLoading(true)
+
+    Promise.allSettled([
+      api.employees.getById(empId),
+      api.projects.list({ limit: 100 }),
+      api.clients.list({ limit: 100 }),
+    ])
+      .then(([empRes, projRes, clientRes]) => {
+        if (!mounted) return
+
+        if (empRes.status === 'fulfilled' && empRes.value) {
+          const detail = empRes.value
+          setEmployee(detail.employee || (detail as unknown as Employee))
+          if (detail.assignedProjects) setProjects(detail.assignedProjects)
+        }
+
+        if (projRes.status === 'fulfilled') {
+          const matching = (projRes.value?.projects || []).filter(
+            (p) =>
+              p.primaryEmployeeId === empId ||
+              p.additionalMemberIds?.includes(empId),
+          )
+          setProjects(matching)
+        }
+
+        if (clientRes.status === 'fulfilled') {
+          setClients(clientRes.value?.clients || [])
+        }
+      })
+      .finally(() => {
+        if (mounted) setLoading(false)
+      })
+
+    return () => {
+      mounted = false
+    }
+  }, [empId])
 
   // Lookups
-  const clientMap = useMemo(() => new Map(mockClients.map((c) => [c.id, c])), [])
+  const clientMap = useMemo(() => new Map(clients.map((c) => [c.id, c])), [clients])
 
-  // Assigned projects
-  const assignedProjects = useMemo(() => {
-    return mockProjects.filter(
-      (p) =>
-        p.primaryEmployeeId === empId || p.additionalMemberIds.includes(empId),
+  const assignedProjects = projects
+
+  if (loading) {
+    return (
+      <ContentWrapper>
+        <div className="space-y-6">
+          <CardSkeleton rows={2} />
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <CardSkeleton key={i} rows={2} />
+            ))}
+          </div>
+          <TableSkeleton rows={4} cols={4} />
+        </div>
+      </ContentWrapper>
     )
-  }, [empId])
-
-  const employeeDoubts = useMemo(() => {
-    return mockDoubts.filter((d) => d.raisedById === empId)
-  }, [empId])
+  }
 
   if (!employee) {
     return (
@@ -99,20 +155,27 @@ function AdminEmployeeDetailContent() {
   const overdueProjects = activeProjects.filter((p) =>
     isOverdue(p.deliveryDate, p.status),
   )
-  const openDoubts = employeeDoubts.filter((d) => d.status === 'open')
 
-  // Calculate on-time rate: completed projects not marked as overdue
+  // Calculate on-time rate
   const onTimeRate =
     totalHandled > 0
       ? Math.round(((totalHandled - overdueProjects.length) / totalHandled) * 100)
       : 100
 
-  function toggleActiveStatus() {
+  const employeeDoubts = doubts
+  const openDoubts = doubts.filter((d) => d.status === 'open')
+
+  async function toggleActiveStatus() {
+    const nextStatus = employee!.status === 'active' ? 'inactive' : 'active'
     const updated = {
       ...employee!,
-      status: (employee!.status === 'active' ? 'inactive' : 'active') as 'active' | 'inactive',
+      status: nextStatus as 'active' | 'inactive',
     }
     setEmployee(updated)
+
+    try {
+      await api.employees.toggleStatus(employee!.id, nextStatus)
+    } catch {}
   }
 
   return (

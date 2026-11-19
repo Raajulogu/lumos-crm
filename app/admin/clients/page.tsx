@@ -1,15 +1,24 @@
 'use client'
 
 // app/admin/clients/page.tsx
-// Clients Directory — Mobile-first card list & desktop data table with filtering, search, and client metrics.
+// Clients Directory — Connected to live backend API with skeletons and 0-data screen.
 
-import { useState, useMemo } from 'react'
+import { useState, useEffect, useMemo, Suspense } from 'react'
 import Link from 'next/link'
 import { ContentWrapper } from '@/components/layout/ContentWrapper'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { Card, Badge, Button, EmptyState } from '@/components/ui'
+import {
+  Card,
+  Badge,
+  Button,
+  EmptyState,
+  PageLoader,
+  TableSkeleton,
+  MetricCardSkeleton,
+} from '@/components/ui'
 import { SearchBar, FilterBar, Pagination } from '@/components/common'
-import { mockClients, mockProjects } from '@/lib/mock-data'
+import { api } from '@/lib/api'
+import type { Client, Project } from '@/lib/types'
 import {
   Plus,
   Users,
@@ -19,22 +28,70 @@ import {
   Briefcase,
   ChevronRight,
   ExternalLink,
+  AlertCircle,
 } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 
 export default function ClientsPage() {
+  return (
+    <Suspense fallback={<PageLoader />}>
+      <ClientsContent />
+    </Suspense>
+  )
+}
+
+function ClientsContent() {
+  const [clients, setClients] = useState<Client[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [currentPage, setCurrentPage] = useState(1)
-  const itemsPerPage = 6
+  const itemsPerPage = 8
+
+  useEffect(() => {
+    let mounted = true
+    setLoading(true)
+    setError(null)
+
+    Promise.allSettled([
+      api.clients.list({ search, status: statusFilter, limit: 100 }),
+      api.projects.list({ limit: 100 }),
+    ])
+      .then(([clientRes, projRes]) => {
+        if (!mounted) return
+        if (clientRes.status === 'fulfilled') {
+          setClients(clientRes.value?.clients || [])
+        } else {
+          setError('Failed to fetch clients from server')
+        }
+        if (projRes.status === 'fulfilled') {
+          setProjects(projRes.value?.projects || [])
+        }
+      })
+      .finally(() => {
+        if (mounted) setLoading(false)
+      })
+
+    return () => {
+      mounted = false
+    }
+  }, [search, statusFilter])
 
   // Project count and spend calculation per client
   const clientStatsMap = useMemo(() => {
-    const map = new Map<string, { totalProjects: number; totalSpend: number; activeProjects: number }>()
-    mockClients.forEach((c) => {
-      const clientProjects = mockProjects.filter((p) => p.clientId === c.id)
+    const map = new Map<
+      string,
+      { totalProjects: number; totalSpend: number; activeProjects: number }
+    >()
+    clients.forEach((c) => {
+      const clientProjects = projects.filter((p) => p.clientId === c.id)
       const totalSpend = clientProjects.reduce((sum, p) => sum + p.budget, 0)
-      const activeProjects = clientProjects.filter((p) => p.status !== 'delivered').length
+      const activeProjects = clientProjects.filter(
+        (p) => p.status !== 'delivered',
+      ).length
       map.set(c.id, {
         totalProjects: clientProjects.length,
         totalSpend,
@@ -42,23 +99,23 @@ export default function ClientsPage() {
       })
     })
     return map
-  }, [])
+  }, [clients, projects])
 
-  // Filtered clients
+  // Filtered clients client-side search fallback
   const filteredClients = useMemo(() => {
-    return mockClients.filter((client) => {
+    return clients.filter((client) => {
       const matchesSearch =
         client.fullName.toLowerCase().includes(search.toLowerCase()) ||
         client.companyName.toLowerCase().includes(search.toLowerCase()) ||
-        client.email.toLowerCase().includes(search.toLowerCase()) ||
-        client.phone.includes(search)
+        (client.email && client.email.toLowerCase().includes(search.toLowerCase())) ||
+        (client.phone && client.phone.includes(search))
 
       const matchesStatus =
         statusFilter === 'all' ? true : client.status === statusFilter
 
       return matchesSearch && matchesStatus
     })
-  }, [search, statusFilter])
+  }, [clients, search, statusFilter])
 
   // Pagination
   const totalPages = Math.ceil(filteredClients.length / itemsPerPage)
@@ -67,13 +124,23 @@ export default function ClientsPage() {
     return filteredClients.slice(start, start + itemsPerPage)
   }, [filteredClients, currentPage, itemsPerPage])
 
-  const totalBilledAllClients = mockProjects.reduce((acc, p) => acc + p.budget, 0)
-  const activeClientsCount = mockClients.filter((c) => c.status === 'active').length
+  const totalBilledAllClients = useMemo(
+    () => projects.reduce((acc, p) => acc + p.budget, 0),
+    [projects],
+  )
+  const activeClientsCount = useMemo(
+    () => clients.filter((c) => c.status === 'active').length,
+    [clients],
+  )
 
   const filterOptions = [
-    { id: 'all', label: 'All Clients', count: mockClients.length },
+    { id: 'all', label: 'All Clients', count: clients.length },
     { id: 'active', label: 'Active', count: activeClientsCount },
-    { id: 'inactive', label: 'Inactive', count: mockClients.length - activeClientsCount },
+    {
+      id: 'inactive',
+      label: 'Inactive',
+      count: clients.length - activeClientsCount,
+    },
   ]
 
   return (
@@ -91,34 +158,82 @@ export default function ClientsPage() {
         }
       />
 
-      {/* Metric Highlights */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
-        <Card padding="sm">
-          <p className="text-xs text-text-muted">Total Client Base</p>
-          <p className="text-xl font-bold text-text-primary mt-0.5">{mockClients.length}</p>
-        </Card>
-        <Card padding="sm">
-          <p className="text-xs text-text-muted">Active Engagements</p>
-          <p className="text-xl font-bold text-success-dark mt-0.5">{activeClientsCount}</p>
-        </Card>
-        <Card padding="sm" className="col-span-2 md:col-span-1">
-          <p className="text-xs text-text-muted">Total Lifetime Value</p>
-          <p className="text-xl font-bold text-brand-700 mt-0.5">
-            {formatCurrency(totalBilledAllClients)}
-          </p>
-        </Card>
+      {error && (
+        <div className="mb-6 p-4 rounded-xl bg-danger-light border border-danger/30 text-danger-dark flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-5 w-5 flex-shrink-0" />
+            <span className="text-sm font-medium">{error}</span>
+          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => window.location.reload()}
+          >
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {/* Top Level Metric Summary Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        {loading ? (
+          Array.from({ length: 4 }).map((_, i) => <MetricCardSkeleton key={i} />)
+        ) : (
+          <>
+            <Card padding="md">
+              <p className="text-xs text-text-muted">Total Accounts</p>
+              <p className="text-2xl font-bold text-text-primary mt-1">
+                {clients.length}
+              </p>
+              <p className="text-[11px] text-text-muted mt-0.5">
+                {activeClientsCount} active
+              </p>
+            </Card>
+
+            <Card padding="md">
+              <p className="text-xs text-text-muted">Active Retainers</p>
+              <p className="text-2xl font-bold text-text-primary mt-1">
+                {activeClientsCount}
+              </p>
+              <p className="text-[11px] text-success mt-0.5 font-medium">
+                {clients.length > 0
+                  ? Math.round((activeClientsCount / clients.length) * 100)
+                  : 0}
+                % active rate
+              </p>
+            </Card>
+
+            <Card padding="md">
+              <p className="text-xs text-text-muted">Total Projects</p>
+              <p className="text-2xl font-bold text-text-primary mt-1">
+                {projects.length}
+              </p>
+              <p className="text-[11px] text-text-muted mt-0.5">
+                {projects.filter((p) => p.status !== 'delivered').length} ongoing
+              </p>
+            </Card>
+
+            <Card padding="md">
+              <p className="text-xs text-text-muted">Total Agency Value</p>
+              <p className="text-2xl font-bold text-text-primary mt-1">
+                {formatCurrency(totalBilledAllClients)}
+              </p>
+              <p className="text-[11px] text-text-muted mt-0.5">Across all accounts</p>
+            </Card>
+          </>
+        )}
       </div>
 
-      {/* Search and Filters Bar */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 mb-4">
+      {/* Search & Filters */}
+      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between mb-4">
         <SearchBar
           value={search}
           onChange={(val) => {
             setSearch(val)
             setCurrentPage(1)
           }}
-          placeholder="Search client by name, company, or email..."
-          className="w-full sm:max-w-xs"
+          placeholder="Search by company, contact person, or email..."
+          className="max-w-md w-full"
         />
 
         <FilterBar
@@ -131,180 +246,225 @@ export default function ClientsPage() {
         />
       </div>
 
-      {/* Clients Display: Mobile Card View + Desktop Data Table */}
-      {paginatedClients.length === 0 ? (
-        <Card padding="lg">
+      {/* Loading Skeleton */}
+      {loading ? (
+        <TableSkeleton rows={6} cols={5} />
+      ) : paginatedClients.length === 0 ? (
+        /* 0 Screen / Empty State */
+        <Card padding="lg" className="text-center py-12">
           <EmptyState
-            icon={<Users className="h-10 w-10" />}
-            title="No clients found"
+            icon={<Building2 className="h-10 w-10 text-slate-300 mx-auto" />}
+            title={search ? 'No matching clients found' : '0 Clients Registered'}
             description={
               search
-                ? `No clients matched "${search}". Try clearing filters or search terms.`
-                : 'Get started by creating your first digital marketing client.'
+                ? `No clients matched "${search}". Try searching another name or reset filters.`
+                : 'Start onboarding your agency clients to manage their digital marketing deliverables.'
             }
             action={
-              search
-                ? { label: 'Clear Filters', onClick: () => { setSearch(''); setStatusFilter('all'); } }
-                : undefined
+              search ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setSearch('')
+                    setStatusFilter('all')
+                  }}
+                >
+                  Clear search
+                </Button>
+              ) : (
+                <Link href="/admin/clients/new">
+                  <Button variant="primary" size="sm">
+                    <Plus className="h-4 w-4" />
+                    <span>Add First Client</span>
+                  </Button>
+                </Link>
+              )
             }
           />
         </Card>
       ) : (
-        <div className="space-y-4">
-          {/* Mobile View: High-tap-target card list (< 768px) */}
+        <>
+          {/* Desktop Table View */}
+          <div className="hidden md:block">
+            <Card padding="none" className="overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-text-secondary">
+                  <thead className="bg-surface border-b border-border text-text-primary font-semibold">
+                    <tr>
+                      <th className="py-3 px-4">Company & Client</th>
+                      <th className="py-3 px-4">Direct Contact</th>
+                      <th className="py-3 px-4">Projects</th>
+                      <th className="py-3 px-4">Total Billed</th>
+                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border bg-white">
+                    {paginatedClients.map((client) => {
+                      const stats = clientStatsMap.get(client.id) || {
+                        totalProjects: 0,
+                        totalSpend: 0,
+                        activeProjects: 0,
+                      }
+
+                      return (
+                        <tr
+                          key={client.id}
+                          className="hover:bg-surface/50 transition-colors"
+                        >
+                          <td className="py-3.5 px-4">
+                            <div className="flex items-center gap-3">
+                              <div className="h-9 w-9 rounded-lg bg-brand-50 border border-brand-200 text-brand-700 flex items-center justify-center font-bold text-sm flex-shrink-0">
+                                {client.companyName.charAt(0)}
+                              </div>
+                              <div className="min-w-0">
+                                <Link
+                                  href={`/admin/clients/${client.id}`}
+                                  className="font-semibold text-text-primary hover:text-brand-600 block truncate"
+                                >
+                                  {client.companyName}
+                                </Link>
+                                <span className="text-[11px] text-text-muted truncate block">
+                                  {client.fullName}
+                                </span>
+                              </div>
+                            </div>
+                          </td>
+
+                          <td className="py-3.5 px-4">
+                            <div className="space-y-0.5">
+                              {client.email && (
+                                <div className="flex items-center gap-1.5 text-text-secondary truncate">
+                                  <Mail className="h-3 w-3 text-text-muted flex-shrink-0" />
+                                  <span className="truncate">{client.email}</span>
+                                </div>
+                              )}
+                              {client.phone && (
+                                <div className="flex items-center gap-1.5 text-text-muted">
+                                  <Phone className="h-3 w-3 flex-shrink-0" />
+                                  <span>{client.phone}</span>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+
+                          <td className="py-3.5 px-4">
+                            <div className="flex items-center gap-1.5">
+                              <Briefcase className="h-3.5 w-3.5 text-text-muted" />
+                              <span className="font-semibold text-text-primary">
+                                {stats.totalProjects}
+                              </span>
+                              {stats.activeProjects > 0 && (
+                                <span className="text-[11px] text-warning-dark font-medium">
+                                  ({stats.activeProjects} active)
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          <td className="py-3.5 px-4 font-semibold text-text-primary">
+                            {formatCurrency(stats.totalSpend)}
+                          </td>
+
+                          <td className="py-3.5 px-4">
+                            <Badge
+                              variant={client.status === 'active' ? 'green' : 'gray'}
+                              size="sm"
+                            >
+                              {client.status === 'active' ? 'Active' : 'Inactive'}
+                            </Badge>
+                          </td>
+
+                          <td className="py-3.5 px-4 text-right">
+                            <Link href={`/admin/clients/${client.id}`}>
+                              <Button variant="secondary" size="sm">
+                                View Profile
+                              </Button>
+                            </Link>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          </div>
+
+          {/* Mobile Card List View */}
           <div className="grid grid-cols-1 gap-3 md:hidden">
             {paginatedClients.map((client) => {
-              const stats = clientStatsMap.get(client.id)
+              const stats = clientStatsMap.get(client.id) || {
+                totalProjects: 0,
+                totalSpend: 0,
+                activeProjects: 0,
+              }
 
               return (
-                <Link key={client.id} href={`/admin/clients/${client.id}`}>
-                  <Card padding="md" hover className="flex flex-col gap-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <Building2 className="h-4 w-4 text-brand-600 flex-shrink-0" />
-                          <h3 className="font-semibold text-sm text-text-primary truncate">
-                            {client.companyName}
-                          </h3>
-                        </div>
-                        <p className="text-xs text-text-secondary mt-0.5">
-                          Contact: <span className="font-medium">{client.fullName}</span>
-                        </p>
+                <Card key={client.id} padding="md">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="h-10 w-10 rounded-lg bg-brand-50 border border-brand-200 text-brand-700 flex items-center justify-center font-bold text-sm">
+                        {client.companyName.charAt(0)}
                       </div>
-
-                      <Badge
-                        variant={client.status === 'active' ? 'green' : 'gray'}
-                        size="sm"
-                      >
-                        {client.status}
-                      </Badge>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-border bg-surface -mx-4 -mb-4 px-4 py-2.5 rounded-b-xl">
                       <div>
-                        <span className="text-text-muted">Projects: </span>
-                        <strong className="text-text-primary">
-                          {stats?.totalProjects ?? 0}
-                          {stats?.activeProjects ? ` (${stats.activeProjects} active)` : ''}
-                        </strong>
-                      </div>
-                      <div className="text-right">
-                        <span className="text-text-muted">Total Value: </span>
-                        <strong className="text-brand-700">
-                          {formatCurrency(stats?.totalSpend ?? 0)}
-                        </strong>
+                        <Link
+                          href={`/admin/clients/${client.id}`}
+                          className="font-semibold text-text-primary hover:text-brand-600 text-sm"
+                        >
+                          {client.companyName}
+                        </Link>
+                        <p className="text-xs text-text-muted">{client.fullName}</p>
                       </div>
                     </div>
-                  </Card>
-                </Link>
+                    <Badge
+                      variant={client.status === 'active' ? 'green' : 'gray'}
+                      size="sm"
+                    >
+                      {client.status}
+                    </Badge>
+                  </div>
+
+                  <div className="mt-3 pt-3 border-t border-border grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="text-text-muted">Total Projects:</span>{' '}
+                      <strong className="text-text-primary">
+                        {stats.totalProjects}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-text-muted">Billed:</span>{' '}
+                      <strong className="text-text-primary">
+                        {formatCurrency(stats.totalSpend)}
+                      </strong>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 pt-2 flex items-center justify-end">
+                    <Link href={`/admin/clients/${client.id}`} className="w-full">
+                      <Button variant="secondary" size="sm" className="w-full">
+                        View Client Details
+                      </Button>
+                    </Link>
+                  </div>
+                </Card>
               )
             })}
           </div>
 
-          {/* Desktop Table View (>= 768px) */}
-          <div className="hidden md:block overflow-hidden rounded-xl border border-border bg-white shadow-sm">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-surface border-b border-border text-xs font-semibold uppercase text-text-secondary">
-                <tr>
-                  <th scope="col" className="px-5 py-3.5">Company & Contact</th>
-                  <th scope="col" className="px-4 py-3.5">Email</th>
-                  <th scope="col" className="px-4 py-3.5">Phone</th>
-                  <th scope="col" className="px-4 py-3.5 text-center">Projects</th>
-                  <th scope="col" className="px-4 py-3.5 text-right">Total Billed</th>
-                  <th scope="col" className="px-4 py-3.5 text-center">Status</th>
-                  <th scope="col" className="px-5 py-3.5 text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {paginatedClients.map((client) => {
-                  const stats = clientStatsMap.get(client.id)
-
-                  return (
-                    <tr
-                      key={client.id}
-                      className="hover:bg-surface/60 transition-colors duration-100"
-                    >
-                      <td className="px-5 py-3.5 font-medium">
-                        <Link
-                          href={`/admin/clients/${client.id}`}
-                          className="text-text-primary hover:text-brand-600 font-semibold flex items-center gap-1.5"
-                        >
-                          <Building2 className="h-4 w-4 text-text-muted flex-shrink-0" />
-                          <span>{client.companyName}</span>
-                        </Link>
-                        <p className="text-xs text-text-muted pl-5 font-normal">
-                          {client.fullName}
-                        </p>
-                      </td>
-                      <td className="px-4 py-3.5 text-xs text-text-secondary">
-                        <div className="flex items-center gap-1">
-                          <Mail className="h-3.5 w-3.5 text-text-muted" />
-                          <a
-                            href={`mailto:${client.email}`}
-                            className="hover:underline hover:text-brand-600"
-                          >
-                            {client.email}
-                          </a>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3.5 text-xs text-text-secondary">
-                        <div className="flex items-center gap-1">
-                          <Phone className="h-3.5 w-3.5 text-text-muted" />
-                          <a
-                            href={`tel:${client.phone}`}
-                            className="hover:underline hover:text-brand-600"
-                          >
-                            {client.phone}
-                          </a>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3.5 text-center text-xs">
-                        <span className="font-semibold text-text-primary">
-                          {stats?.totalProjects ?? 0}
-                        </span>
-                        {stats && stats.activeProjects > 0 && (
-                          <span className="text-brand-600 font-medium ml-1">
-                            ({stats.activeProjects} active)
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3.5 text-right text-xs font-semibold text-text-primary">
-                        {formatCurrency(stats?.totalSpend ?? 0)}
-                      </td>
-                      <td className="px-4 py-3.5 text-center">
-                        <Badge
-                          variant={client.status === 'active' ? 'green' : 'gray'}
-                          size="sm"
-                        >
-                          {client.status}
-                        </Badge>
-                      </td>
-                      <td className="px-5 py-3.5 text-right">
-                        <Link href={`/admin/clients/${client.id}`}>
-                          <Button variant="ghost" size="sm">
-                            <span>View</span>
-                            <ChevronRight className="h-4 w-4 text-text-muted" />
-                          </Button>
-                        </Link>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Pagination */}
-          <Pagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            totalItems={filteredClients.length}
-            itemsPerPage={itemsPerPage}
-            onPageChange={(page) => setCurrentPage(page)}
-          />
-        </div>
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div className="mt-6 flex justify-center">
+              <Pagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPageChange={setCurrentPage}
+              />
+            </div>
+          )}
+        </>
       )}
     </ContentWrapper>
   )
 }
-

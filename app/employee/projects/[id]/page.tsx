@@ -3,7 +3,7 @@
 // app/employee/projects/[id]/page.tsx
 // Employee Project Workspace — task execution, status updates, raise doubt Q&A with admin, and notes.
 
-import { useState, useMemo, Suspense } from 'react'
+import { useState, useMemo, useEffect, Suspense } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ContentWrapper } from '@/components/layout/ContentWrapper'
@@ -18,15 +18,12 @@ import {
   Modal,
   Tabs,
   PageLoader,
+  CardSkeleton,
+  TableSkeleton,
 } from '@/components/ui'
 import { ProjectPipelineStepper } from '@/components/common'
-import {
-  mockProjects,
-  mockClients,
-  mockCategories,
-  mockDoubts,
-  mockNotes,
-} from '@/lib/mock-data'
+import { api } from '@/lib/api'
+import type { Project, Client, Doubt, Note, ServiceCategory, ProjectStatus, ProjectPriority, DoubtPriority } from '@/lib/types'
 import {
   Briefcase,
   Building2,
@@ -40,6 +37,7 @@ import {
   Check,
   HelpCircle,
   CheckCircle2,
+  AlertCircle,
 } from 'lucide-react'
 import {
   formatDate,
@@ -53,7 +51,6 @@ import {
   generateId,
 } from '@/lib/utils'
 import { useAuth } from '@/lib/auth-context'
-import type { ProjectStatus, ProjectPriority, DoubtPriority } from '@/lib/types'
 
 export default function EmployeeProjectDetailPage() {
   return (
@@ -71,29 +68,69 @@ function EmployeeProjectDetailContent() {
 
   const currentEmpId = currentUser.role === 'employee' ? currentUser.id : 'emp-1'
 
-  const initialProject = mockProjects.find((p) => p.id === projectId)
-  const [project, setProject] = useState(initialProject)
-
+  const [loading, setLoading] = useState(true)
+  const [project, setProject] = useState<Project | null>(null)
+  const [categories, setCategories] = useState<ServiceCategory[]>([])
   const [activeTab, setActiveTab] = useState('scope')
 
   // Doubts state
-  const [projectDoubts, setProjectDoubts] = useState(
-    mockDoubts.filter((d) => d.projectId === projectId),
-  )
+  const [projectDoubts, setProjectDoubts] = useState<Doubt[]>([])
   const [isDoubtModalOpen, setIsDoubtModalOpen] = useState(false)
   const [doubtSubject, setDoubtSubject] = useState('')
   const [doubtDescription, setDoubtDescription] = useState('')
   const [doubtPriority, setDoubtPriority] = useState<DoubtPriority>('normal')
 
   // Notes state
-  const [projectNotes, setProjectNotes] = useState(
-    mockNotes.filter((n) => n.projectId === projectId),
-  )
+  const [projectNotes, setProjectNotes] = useState<Note[]>([])
   const [newNote, setNewNote] = useState('')
 
-  // Lookups (Privacy Protected: Name + Company only)
-  const client = project ? mockClients.find((c) => c.id === project.clientId) : null
-  const categoryMap = useMemo(() => new Map(mockCategories.map((c) => [c.id, c])), [])
+  useEffect(() => {
+    let mounted = true
+    setLoading(true)
+
+    Promise.allSettled([
+      api.projects.getById(projectId),
+      api.settings.getCategories(),
+      api.doubts.listByProject(projectId),
+      api.notes.listByProject(projectId),
+    ])
+      .then(([projRes, catRes, doubtRes, noteRes]) => {
+        if (!mounted) return
+
+        if (projRes.status === 'fulfilled' && projRes.value) {
+          setProject(projRes.value)
+        }
+
+        if (catRes.status === 'fulfilled') setCategories(catRes.value || [])
+        if (doubtRes.status === 'fulfilled') setProjectDoubts(doubtRes.value || [])
+        if (noteRes.status === 'fulfilled') setProjectNotes(noteRes.value || [])
+      })
+      .finally(() => {
+        if (mounted) setLoading(false)
+      })
+
+    return () => {
+      mounted = false
+    }
+  }, [projectId])
+
+  const categoryMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
+
+  if (loading) {
+    return (
+      <ContentWrapper>
+        <div className="space-y-6">
+          <CardSkeleton rows={2} />
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <CardSkeleton key={i} rows={2} />
+            ))}
+          </div>
+          <TableSkeleton rows={4} cols={4} />
+        </div>
+      </ContentWrapper>
+    )
+  }
 
   if (!project) {
     return (
@@ -115,53 +152,76 @@ function EmployeeProjectDetailContent() {
   }
 
   // Update status (Employee can update status of their assigned project)
-  function handleStatusChange(newStatus: ProjectStatus) {
+  async function handleStatusChange(newStatus: ProjectStatus) {
     const updated = { ...project!, status: newStatus, updatedAt: new Date().toISOString() }
     setProject(updated)
+
+    try {
+      await api.projects.updateStatus(project!.id, newStatus)
+    } catch {}
   }
 
   // Submit Doubt to Admin
-  function handleRaiseDoubt(e: React.FormEvent) {
+  async function handleRaiseDoubt(e: React.FormEvent) {
     e.preventDefault()
     if (!doubtSubject.trim() || !doubtDescription.trim()) return
 
-    const newDbt = {
+    const newDbt: Doubt = {
       id: `dbt-${generateId()}`,
       projectId: project!.id,
       raisedById: currentEmpId,
       subject: doubtSubject.trim(),
       description: doubtDescription.trim(),
       priority: doubtPriority,
-      status: 'open' as const,
+      status: 'open',
       createdAt: new Date().toISOString(),
     }
 
-    mockDoubts.unshift(newDbt)
     setProjectDoubts([newDbt, ...projectDoubts])
+    const s = doubtSubject.trim()
+    const d = doubtDescription.trim()
+    const p = doubtPriority
     setIsDoubtModalOpen(false)
     setDoubtSubject('')
     setDoubtDescription('')
     setActiveTab('doubts')
+
+    try {
+      await api.doubts.raise(project!.id, {
+        subject: s,
+        description: d,
+        priority: p,
+      })
+    } catch {}
   }
 
   // Post Note
-  function handleAddNote(e: React.FormEvent) {
+  async function handleAddNote(e: React.FormEvent) {
     e.preventDefault()
     if (!newNote.trim()) return
 
-    const added = {
+    const added: Note = {
       id: `note-${generateId()}`,
       projectId: project!.id,
       authorId: currentEmpId,
-      authorType: 'employee' as const,
-      authorName: currentUser.fullName || 'Employee Staff',
+      authorType: 'employee',
+      authorName: currentUser.fullName,
       content: newNote.trim(),
       createdAt: new Date().toISOString(),
     }
 
-    mockNotes.unshift(added)
     setProjectNotes([added, ...projectNotes])
+    const noteText = newNote.trim()
     setNewNote('')
+
+    try {
+      await api.notes.add(project!.id, noteText)
+    } catch {}
+  }
+
+  const client = (project as any)?.client || {
+    companyName: (project as any)?.clientName || 'Client Account',
+    fullName: (project as any)?.contactName || 'Client Contact',
   }
 
   const isLate = isOverdue(project.deliveryDate, project.status)

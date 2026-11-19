@@ -20,7 +20,7 @@ import {
 } from 'lucide-react'
 import { Button, Avatar, Badge } from '@/components/ui'
 import { cn } from '@/lib/utils'
-import { mockNotifications } from '@/lib/mock-data'
+import { api } from '@/lib/api'
 import { useAuth } from '@/lib/auth-context'
 
 interface TopbarProps {
@@ -41,17 +41,25 @@ export function Topbar({
   const router = useRouter()
   const { currentUser, loginAs, logout } = useAuth()
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
+  const [unreadCount, setUnreadCount] = useState(0)
   const menuRef = useRef<HTMLDivElement>(null)
 
   const activeName = propUserName || currentUser.fullName || 'User'
   const activeEmail = currentUser.email || (userRole === 'admin' ? 'admin@markcrm.com' : 'priya@markcrm.com')
   const activeDesignation = currentUser.designation || (userRole === 'admin' ? 'Agency Director & Head' : 'Marketing Staff')
 
-  // Count unread notifications for this user
-  const targetRecipientId = userRole === 'admin' ? 'admin' : currentUser.id
-  const unreadCount = mockNotifications.filter(
-    (n) => n.recipientId === targetRecipientId && !n.read,
-  ).length
+  // Fetch unread count from real API
+  useEffect(() => {
+    api.notifications
+      .list({ unreadOnly: true })
+      .then((notifs) => {
+        if (notifs) {
+          const unread = notifs.filter((n) => !n.read).length
+          setUnreadCount(unread)
+        }
+      })
+      .catch(() => {})
+  }, [userRole, currentUser.id])
 
   // Close dropdown on click outside
   useEffect(() => {

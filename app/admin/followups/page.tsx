@@ -1,9 +1,9 @@
 'use client'
 
 // app/admin/followups/page.tsx
-// Follow-up Scheduler — Manage client calls, proposal check-ins, and automated reminder alerts.
+// Follow-up Scheduler — Connected to live backend API with skeletons and 0-data screen.
 
-import { useState, useMemo, Suspense } from 'react'
+import { useState, useMemo, useEffect, Suspense } from 'react'
 import Link from 'next/link'
 import { ContentWrapper } from '@/components/layout/ContentWrapper'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -16,14 +16,12 @@ import {
   Input,
   Textarea,
   PageLoader,
+  MetricCardSkeleton,
+  TableSkeleton,
 } from '@/components/ui'
 import { SearchBar, FilterBar, Pagination } from '@/components/common'
-import {
-  mockFollowUps,
-  mockClients,
-  mockProjects,
-  mockEmployees,
-} from '@/lib/mock-data'
+import { api } from '@/lib/api'
+import type { FollowUp, Client, Project, Employee, FollowUpStatus } from '@/lib/types'
 import {
   Phone,
   Calendar,
@@ -36,13 +34,13 @@ import {
   Plus,
   Check,
   RotateCcw,
+  AlertCircle,
 } from 'lucide-react'
 import {
   formatDate,
   formatDateTime,
   generateId,
 } from '@/lib/utils'
-import type { FollowUpStatus } from '@/lib/types'
 
 export default function AdminFollowUpsPage() {
   return (
@@ -53,7 +51,13 @@ export default function AdminFollowUpsPage() {
 }
 
 function AdminFollowUpsContent() {
-  const [followups, setFollowups] = useState(mockFollowUps)
+  const [followups, setFollowups] = useState<FollowUp[]>([])
+  const [clients, setClients] = useState<Client[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [currentPage, setCurrentPage] = useState(1)
@@ -67,32 +71,67 @@ function AdminFollowUpsContent() {
   const [modalAssignee, setModalAssignee] = useState('admin')
   const [modalNotes, setModalNotes] = useState('')
 
+  useEffect(() => {
+    let mounted = true
+    setLoading(true)
+    setError(null)
+
+    Promise.allSettled([
+      api.followups.list({ limit: 100 }),
+      api.clients.list({ limit: 100 }),
+      api.projects.list({ limit: 100 }),
+      api.employees.list(),
+    ])
+      .then(([fuRes, clientRes, projRes, empRes]) => {
+        if (!mounted) return
+
+        if (fuRes.status === 'fulfilled') {
+          setFollowups(fuRes.value?.followups || [])
+        } else {
+          setError('Failed to fetch follow-ups from server')
+        }
+
+        if (clientRes.status === 'fulfilled') setClients(clientRes.value?.clients || [])
+        if (projRes.status === 'fulfilled') setProjects(projRes.value?.projects || [])
+        if (empRes.status === 'fulfilled') setEmployees(empRes.value || [])
+      })
+      .finally(() => {
+        if (mounted) setLoading(false)
+      })
+
+    return () => {
+      mounted = false
+    }
+  }, [])
+
   // Lookups
-  const clientMap = useMemo(() => new Map(mockClients.map((c) => [c.id, c])), [])
-  const projectMap = useMemo(() => new Map(mockProjects.map((p) => [p.id, p])), [])
-  const employeeMap = useMemo(() => new Map(mockEmployees.map((e) => [e.id, e])), [])
+  const clientMap = useMemo(() => new Map(clients.map((c) => [c.id, c])), [clients])
+  const projectMap = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects])
+  const employeeMap = useMemo(() => new Map(employees.map((e) => [e.id, e])), [employees])
 
   // Projects filtered by selected client in modal
   const clientProjects = useMemo(() => {
-    if (!modalClientId) return mockProjects
-    return mockProjects.filter((p) => p.clientId === modalClientId)
-  }, [modalClientId])
+    if (!modalClientId) return projects
+    return projects.filter((p) => p.clientId === modalClientId)
+  }, [modalClientId, projects])
 
   // Mark Done / Pending toggle
-  function toggleFollowupStatus(id: string) {
+  async function toggleFollowupStatus(id: string) {
+    const fu = followups.find((f) => f.id === id)
+    if (!fu) return
+
+    const nextStatus: FollowUpStatus = fu.status === 'done' ? 'pending' : 'done'
     setFollowups((prev) =>
-      prev.map((item) => {
-        if (item.id === id) {
-          const nextStatus: FollowUpStatus = item.status === 'done' ? 'pending' : 'done'
-          return { ...item, status: nextStatus }
-        }
-        return item
-      }),
+      prev.map((item) => (item.id === id ? { ...item, status: nextStatus } : item)),
     )
+
+    try {
+      await api.followups.updateStatus(id, nextStatus)
+    } catch {}
   }
 
   // Create Follow-up
-  function handleCreateFollowup(e: React.FormEvent) {
+  async function handleCreateFollowup(e: React.FormEvent) {
     e.preventDefault()
     if (!modalDate || !modalClientId) return
 
@@ -117,6 +156,16 @@ function AdminFollowUpsContent() {
     setModalNotes('')
     setModalClientId('')
     setModalProjectId('')
+
+    try {
+      await api.followups.create({
+        projectId: newFU.projectId,
+        clientId: newFU.clientId,
+        scheduledAt: newFU.scheduledAt,
+        assignedToId: newFU.assignedToId,
+        notes: newFU.notes,
+      })
+    } catch {}
   }
 
   // Filtered dataset
@@ -174,20 +223,42 @@ function AdminFollowUpsContent() {
         }
       />
 
+      {error && (
+        <div className="mb-6 p-4 rounded-xl bg-danger-light border border-danger/30 text-danger-dark flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-5 w-5 flex-shrink-0" />
+            <span className="text-sm font-medium">{error}</span>
+          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => window.location.reload()}
+          >
+            Retry
+          </Button>
+        </div>
+      )}
+
       {/* Highlights */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
-        <Card padding="sm">
-          <p className="text-xs text-text-muted">Total Recorded</p>
-          <p className="text-xl font-bold text-text-primary mt-0.5">{followups.length}</p>
-        </Card>
-        <Card padding="sm">
-          <p className="text-xs text-text-muted">Pending Calls</p>
-          <p className="text-xl font-bold text-warning-dark mt-0.5">{pendingCount}</p>
-        </Card>
-        <Card padding="sm" className="col-span-2 md:col-span-1">
-          <p className="text-xs text-text-muted">Completed Calls</p>
-          <p className="text-xl font-bold text-success-dark mt-0.5">{doneCount}</p>
-        </Card>
+        {loading ? (
+          Array.from({ length: 3 }).map((_, i) => <MetricCardSkeleton key={i} />)
+        ) : (
+          <>
+            <Card padding="sm">
+              <p className="text-xs text-text-muted">Total Recorded</p>
+              <p className="text-xl font-bold text-text-primary mt-0.5">{followups.length}</p>
+            </Card>
+            <Card padding="sm">
+              <p className="text-xs text-text-muted">Pending Calls</p>
+              <p className="text-xl font-bold text-warning-dark mt-0.5">{pendingCount}</p>
+            </Card>
+            <Card padding="sm" className="col-span-2 md:col-span-1">
+              <p className="text-xs text-text-muted">Completed Calls</p>
+              <p className="text-xl font-bold text-success-dark mt-0.5">{doneCount}</p>
+            </Card>
+          </>
+        )}
       </div>
 
       {/* Filter and Search Bar */}
@@ -213,7 +284,9 @@ function AdminFollowUpsContent() {
       </div>
 
       {/* Follow-up Display */}
-      {paginatedFollowups.length === 0 ? (
+      {loading ? (
+        <TableSkeleton rows={6} cols={5} />
+      ) : paginatedFollowups.length === 0 ? (
         <Card padding="lg">
           <EmptyState
             icon={<Phone className="h-10 w-10" />}
@@ -433,7 +506,7 @@ function AdminFollowUpsContent() {
               required
             >
               <option value="">-- Choose Client Company --</option>
-              {mockClients.map((c) => (
+              {clients.map((c: Client) => (
                 <option key={c.id} value={c.id}>
                   {c.companyName} ({c.fullName})
                 </option>
@@ -479,7 +552,7 @@ function AdminFollowUpsContent() {
               className="w-full h-10 rounded-lg border border-border bg-white px-3 text-sm text-text-primary"
             >
               <option value="admin">Admin (You)</option>
-              {mockEmployees.map((emp) => (
+              {employees.map((emp: Employee) => (
                 <option key={emp.id} value={emp.id}>
                   {emp.fullName} ({emp.designation})
                 </option>

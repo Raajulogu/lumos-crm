@@ -24,7 +24,7 @@ import { useAuth } from '@/lib/auth-context'
 
 export default function LoginPage() {
   const router = useRouter()
-  const { loginAs, loginWithCredentials } = useAuth()
+  const { login, loginAs, loginWithCredentials } = useAuth()
 
   const [email, setEmail] = useState('admin@markcrm.com')
   const [password, setPassword] = useState('admin123')
@@ -50,8 +50,8 @@ export default function LoginPage() {
     }, 400)
   }
 
-  // Standard Form Submission
-  function handleSubmit(e: React.FormEvent) {
+  // Standard Form Submission (Real API with fallback)
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
 
@@ -62,31 +62,20 @@ export default function LoginPage() {
 
     setIsLoading(true)
 
-    setTimeout(() => {
-      setIsLoading(false)
-      const user = loginWithCredentials(email)
-
-      if (user) {
-        if (user.role === 'admin') {
-          router.push('/admin/dashboard')
-        } else {
-          router.push('/employee/dashboard')
-        }
+    try {
+      const user = await login({ email, password })
+      if (user.role === 'admin') {
+        router.push('/admin/dashboard')
       } else {
-        // Fallback demo matching
-        const clean = email.trim().toLowerCase()
-        if (clean.includes('admin')) {
-          loginAs('admin')
-          router.push('/admin/dashboard')
-        } else if (clean.includes('arjun')) {
-          loginAs('emp-2')
-          router.push('/employee/dashboard')
-        } else {
-          loginAs('emp-1')
-          router.push('/employee/dashboard')
-        }
+        router.push('/employee/dashboard')
       }
-    }, 500)
+    } catch (err: any) {
+      // If real backend API fails (e.g. invalid credentials or network), show exact message
+      const errMsg = err?.message || 'Invalid credentials. Please try again.'
+      setError(errMsg)
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   return (

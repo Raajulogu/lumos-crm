@@ -3,19 +3,15 @@
 // app/admin/projects/new/page.tsx
 // Project Onboarding Form — client association, service category multi-select, team assignment, and reminder customization.
 
-import { useState, useMemo, Suspense } from 'react'
+import { useState, useMemo, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { ContentWrapper } from '@/components/layout/ContentWrapper'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Card, Input, Textarea, Button, Badge, PageLoader } from '@/components/ui'
-import {
-  mockClients,
-  mockEmployees,
-  mockCategories,
-  mockProjects,
-} from '@/lib/mock-data'
-import { generateId, formatCurrency } from '@/lib/utils'
+import { api } from '@/lib/api'
+import type { Client, Employee, ServiceCategory, ProjectPriority } from '@/lib/types'
+import { formatCurrency } from '@/lib/utils'
 import {
   Briefcase,
   Building2,
@@ -31,7 +27,6 @@ import {
   Bell,
   AlertCircle,
 } from 'lucide-react'
-import type { ProjectPriority, ReminderConfig } from '@/lib/types'
 
 export default function NewProjectPage() {
   return (
@@ -46,7 +41,24 @@ function NewProjectForm() {
   const searchParams = useSearchParams()
   const preselectedClientId = searchParams.get('clientId') || ''
 
+  const [clients, setClients] = useState<Client[]>([])
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [categories, setCategories] = useState<ServiceCategory[]>([])
+  const [serverError, setServerError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  useEffect(() => {
+    setStartDate(new Date().toISOString().split('T')[0])
+    Promise.allSettled([
+      api.clients.list({ limit: 100 }),
+      api.employees.list(),
+      api.settings.getCategories(),
+    ]).then(([clientRes, empRes, catRes]) => {
+      if (clientRes.status === 'fulfilled') setClients(clientRes.value?.clients || [])
+      if (empRes.status === 'fulfilled') setEmployees(empRes.value || [])
+      if (catRes.status === 'fulfilled') setCategories(catRes.value || [])
+    })
+  }, [])
 
   // Form Fields
   const [name, setName] = useState('')
@@ -55,7 +67,7 @@ function NewProjectForm() {
   const [description, setDescription] = useState('')
   const [budget, setBudget] = useState('')
   const [actualCost, setActualCost] = useState('')
-  const [startDate, setStartDate] = useState('2026-11-05')
+  const [startDate, setStartDate] = useState('')
   const [deliveryDate, setDeliveryDate] = useState('')
   const [priority, setPriority] = useState<ProjectPriority>('medium')
   const [primaryEmployeeId, setPrimaryEmployeeId] = useState('')
@@ -122,8 +134,9 @@ function NewProjectForm() {
   }
 
   // Submit
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    setServerError('')
     if (!validate()) return
 
     setIsSubmitting(true)
@@ -131,31 +144,28 @@ function NewProjectForm() {
     const numBudget = Number(budget)
     const numCost = actualCost ? Number(actualCost) : undefined
 
-    const newProject = {
-      id: `proj-${generateId()}`,
-      name: name.trim(),
-      clientId,
-      serviceCategories: selectedCategories,
-      description: description.trim(),
-      budget: numBudget,
-      actualCost: numCost,
-      startDate,
-      deliveryDate,
-      priority,
-      status: 'new' as const,
-      primaryEmployeeId: primaryEmployeeId || undefined,
-      additionalMemberIds,
-      reminderOverrides: reminderDays.map((d) => ({ daysBeforeDeadline: d })),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }
+    try {
+      const created = await api.projects.create({
+        name: name.trim(),
+        clientId,
+        serviceCategories: selectedCategories,
+        description: description.trim(),
+        budget: numBudget,
+        actualCost: numCost,
+        startDate: new Date(startDate).toISOString(),
+        deliveryDate: new Date(deliveryDate).toISOString(),
+        priority,
+        primaryEmployeeId: primaryEmployeeId || undefined,
+        additionalMemberIds,
+      })
 
-    mockProjects.unshift(newProject)
-
-    setTimeout(() => {
+      const projId = created?.id || 'new'
+      router.push(`/admin/projects/${projId}`)
+    } catch (err: any) {
+      setServerError(err?.message || 'Failed to create project on backend server.')
+    } finally {
       setIsSubmitting(false)
-      router.push(`/admin/projects/${newProject.id}`)
-    }, 600)
+    }
   }
 
   // Live profit calculation preview
@@ -184,6 +194,12 @@ function NewProjectForm() {
         }
       />
 
+      {serverError && (
+        <div className="mb-4 p-3 rounded-lg bg-danger-light border border-danger/30 text-danger-dark text-sm font-medium">
+          {serverError}
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} noValidate>
         <Card padding="lg" className="space-y-6">
           {/* Section 1: Client & Project Identity */}
@@ -207,7 +223,7 @@ function NewProjectForm() {
                   }`}
                 >
                   <option value="">-- Select Client --</option>
-                  {mockClients.map((c) => (
+                  {clients.map((c: Client) => (
                     <option key={c.id} value={c.id}>
                       {c.companyName} ({c.fullName})
                     </option>
@@ -245,7 +261,7 @@ function NewProjectForm() {
                 Select all marketing services included in this client deliverable.
               </p>
               <div className="flex flex-wrap gap-2">
-                {mockCategories.map((cat) => {
+                {categories.map((cat: ServiceCategory) => {
                   const isSelected = selectedCategories.includes(cat.id)
                   return (
                     <button
@@ -384,7 +400,7 @@ function NewProjectForm() {
                 className="w-full h-10 rounded-lg border border-border bg-white px-3 text-sm text-text-primary"
               >
                 <option value="">-- Unassigned (Assign Later) --</option>
-                {mockEmployees.map((emp) => (
+                {employees.map((emp: Employee) => (
                   <option key={emp.id} value={emp.id}>
                     {emp.fullName} — {emp.designation} ({emp.payType})
                   </option>
@@ -401,9 +417,9 @@ function NewProjectForm() {
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {mockEmployees
-                  .filter((emp) => emp.id !== primaryEmployeeId)
-                  .map((emp) => {
+                {employees
+                  .filter((emp: Employee) => emp.id !== primaryEmployeeId)
+                  .map((emp: Employee) => {
                     const isChecked = additionalMemberIds.includes(emp.id)
                     return (
                       <label

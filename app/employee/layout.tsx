@@ -3,12 +3,13 @@
 // app/employee/layout.tsx
 // Dashboard shell layout for the employee portal with dynamic active employee context.
 
-import { useState, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { Topbar } from '@/components/layout/Topbar'
 import { MobileNav } from '@/components/layout/MobileNav'
 import { NotificationDrawer } from '@/components/common/NotificationDrawer'
-import { mockNotifications } from '@/lib/mock-data'
+import { api } from '@/lib/api'
+import type { AppNotification } from '@/lib/types'
 import { useSidebar } from '@/hooks/useSidebar'
 import { useAuth } from '@/lib/auth-context'
 
@@ -20,22 +21,31 @@ export default function EmployeeLayout({ children }: EmployeeLayoutProps) {
   const { currentUser } = useAuth()
   const { isOpen, isCollapsed, open, close, toggleCollapse } = useSidebar()
   const [notifOpen, setNotifOpen] = useState(false)
+  const [notifications, setNotifications] = useState<AppNotification[]>([])
 
-  // Current employee notifications
-  const userNotifications = useMemo(() => {
-    return mockNotifications.filter((n) => n.recipientId === currentUser.id)
+  useEffect(() => {
+    api.notifications
+      .list()
+      .then((data) => {
+        if (data) setNotifications(data)
+      })
+      .catch(() => {})
   }, [currentUser.id])
 
-  const [notifications, setNotifications] = useState(userNotifications)
-
-  function handleMarkRead(id: string) {
+  async function handleMarkRead(id: string) {
     setNotifications((prev) =>
       prev.map((n) => (n.id === id ? { ...n, read: true } : n)),
     )
+    try {
+      await api.notifications.markRead(id)
+    } catch {}
   }
 
-  function handleMarkAllRead() {
+  async function handleMarkAllRead() {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
+    try {
+      await api.notifications.markAllRead()
+    } catch {}
   }
 
   return (

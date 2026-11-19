@@ -1,5 +1,5 @@
 // components/ui/index.ts
-// Barrel export — always import from here: import { Button, Badge } from '@/components/ui'
+// Barrel export — always import from here: import { Button, Badge, Skeleton } from '@/components/ui'
 
 export { Button } from './Button'
 export { Input } from './Input'
@@ -15,4 +15,4 @@ export { EmptyState } from './EmptyState'
 export { ConfirmDialog } from './ConfirmDialog'
 export { Tabs } from './Tabs'
 export { Toggle } from './Toggle'
-
+export { Skeleton, MetricCardSkeleton, TableSkeleton, CardSkeleton } from './Skeleton'

@@ -3,7 +3,7 @@
 // app/admin/settings/page.tsx
 // Agency Settings & Administration — Service categories, automated global reminder milestones, and security.
 
-import { useState, Suspense } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { ContentWrapper } from '@/components/layout/ContentWrapper'
 import { PageHeader } from '@/components/layout/PageHeader'
 import {
@@ -16,8 +16,9 @@ import {
   Toggle,
   Modal,
   PageLoader,
+  CardSkeleton,
 } from '@/components/ui'
-import { mockCategories, mockProjects } from '@/lib/mock-data'
+import { api } from '@/lib/api'
 import { generateId } from '@/lib/utils'
 import {
   Settings,
@@ -32,7 +33,7 @@ import {
   Mail,
   Lock,
 } from 'lucide-react'
-import type { ServiceCategory } from '@/lib/types'
+import type { ServiceCategory, Project } from '@/lib/types'
 
 export default function AdminSettingsPage() {
   return (
@@ -44,9 +45,11 @@ export default function AdminSettingsPage() {
 
 function AdminSettingsContent() {
   const [activeTab, setActiveTab] = useState('categories')
+  const [loading, setLoading] = useState(true)
 
   // Categories state
-  const [categories, setCategories] = useState<ServiceCategory[]>(mockCategories)
+  const [categories, setCategories] = useState<ServiceCategory[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
   const [newCatName, setNewCatName] = useState('')
   const [newCatColor, setNewCatColor] = useState('#3b82f6')
   const [catError, setCatError] = useState('')
@@ -67,8 +70,47 @@ function AdminSettingsContent() {
   const [emailDoubtAlerts, setEmailDoubtAlerts] = useState(true)
   const [emailFollowupReminders, setEmailFollowupReminders] = useState(true)
 
+  useEffect(() => {
+    let mounted = true
+    setLoading(true)
+
+    Promise.allSettled([
+      api.settings.getCategories(),
+      api.projects.list({ limit: 100 }),
+      api.settings.getReminders(),
+      api.settings.getNotificationPreferences(),
+    ])
+      .then(([catRes, projRes, remRes, notifRes]) => {
+        if (!mounted) return
+
+        if (catRes.status === 'fulfilled' && catRes.value) {
+          setCategories(catRes.value)
+        }
+        if (projRes.status === 'fulfilled') {
+          setProjects(projRes.value?.projects || [])
+        }
+        if (remRes.status === 'fulfilled' && remRes.value) {
+          setReminderDays(remRes.value.map((r) => r.daysBeforeDeadline))
+        }
+        if (notifRes.status === 'fulfilled' && notifRes.value) {
+          const p = notifRes.value
+          setEmailDeadlineReminders(p.emailDeadlineReminders ?? true)
+          setEmailOverdueAlerts(p.emailOverdueAlerts ?? true)
+          setEmailDoubtAlerts(p.emailDoubtAlerts ?? true)
+          setEmailFollowupReminders(p.emailFollowupReminders ?? true)
+        }
+      })
+      .finally(() => {
+        if (mounted) setLoading(false)
+      })
+
+    return () => {
+      mounted = false
+    }
+  }, [])
+
   // Add Category
-  function handleAddCategory(e: React.FormEvent) {
+  async function handleAddCategory(e: React.FormEvent) {
     e.preventDefault()
     setCatError('')
     if (!newCatName.trim()) return
@@ -90,14 +132,20 @@ function AdminSettingsContent() {
       createdAt: new Date().toISOString(),
     }
 
-    mockCategories.push(created)
     setCategories([...categories, created])
     setNewCatName('')
+
+    try {
+      await api.settings.createCategory({
+        name: created.name,
+        color: created.color,
+      })
+    } catch {}
   }
 
   // Delete Category with safety check
-  function handleDeleteCategory(catId: string) {
-    const isUsed = mockProjects.some((p) => p.serviceCategories.includes(catId))
+  async function handleDeleteCategory(catId: string) {
+    const isUsed = projects.some((p) => p.serviceCategories?.includes(catId))
     if (isUsed) {
       alert(
         'Cannot delete this service category: it is currently referenced by one or more active projects.',
@@ -106,19 +154,69 @@ function AdminSettingsContent() {
     }
 
     setCategories((prev) => prev.filter((c) => c.id !== catId))
+
+    try {
+      await api.settings.deleteCategory(catId)
+    } catch {}
   }
 
   // Reminders
-  function handleAddReminder() {
+  async function handleAddReminder() {
     const num = parseInt(newReminderDay, 10)
     if (!isNaN(num) && num >= 0 && !reminderDays.includes(num)) {
-      setReminderDays([...reminderDays, num].sort((a, b) => b - a))
+      const updated = [...reminderDays, num].sort((a, b) => b - a)
+      setReminderDays(updated)
       setNewReminderDay('')
+
+      try {
+        await api.settings.updateReminders(
+          updated.map((d) => ({ daysBeforeDeadline: d })),
+        )
+      } catch {}
     }
   }
 
-  function handleRemoveReminder(day: number) {
-    setReminderDays(reminderDays.filter((d) => d !== day))
+  async function handleRemoveReminder(day: number) {
+    const updated = reminderDays.filter((d) => d !== day)
+    setReminderDays(updated)
+
+    try {
+      await api.settings.updateReminders(
+        updated.map((d) => ({ daysBeforeDeadline: d })),
+      )
+    } catch {}
+  }
+
+  async function handleToggleNotification(
+    field: 'deadline' | 'overdue' | 'doubt' | 'followup',
+  ) {
+    let nextDeadline = emailDeadlineReminders
+    let nextOverdue = emailOverdueAlerts
+    let nextDoubt = emailDoubtAlerts
+    let nextFollowup = emailFollowupReminders
+
+    if (field === 'deadline') {
+      nextDeadline = !emailDeadlineReminders
+      setEmailDeadlineReminders(nextDeadline)
+    } else if (field === 'overdue') {
+      nextOverdue = !emailOverdueAlerts
+      setEmailOverdueAlerts(nextOverdue)
+    } else if (field === 'doubt') {
+      nextDoubt = !emailDoubtAlerts
+      setEmailDoubtAlerts(nextDoubt)
+    } else if (field === 'followup') {
+      nextFollowup = !emailFollowupReminders
+      setEmailFollowupReminders(nextFollowup)
+    }
+
+    try {
+      await api.settings.updateNotificationPreferences({
+        emailDeadlineReminders: nextDeadline,
+        emailOverdueAlerts: nextOverdue,
+        emailDoubtAlerts: nextDoubt,
+        emailFollowupReminders: nextFollowup,
+      })
+    } catch {}
   }
 
   function handleSaveProfile(e: React.FormEvent) {
@@ -210,8 +308,8 @@ function AdminSettingsContent() {
             {/* Category List */}
             <div className="divide-y divide-border text-xs">
               {categories.map((cat) => {
-                const projectCount = mockProjects.filter((p) =>
-                  p.serviceCategories.includes(cat.id),
+                const projectCount = projects.filter((p) =>
+                  p.serviceCategories?.includes(cat.id),
                 ).length
 
                 return (

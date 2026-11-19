@@ -1,21 +1,31 @@
 'use client'
 
 // app/admin/analytics/page.tsx
-// Agency Analytics & KPI Hub — Revenue, Net Profits, Client Retention, Staff Performance, and Service Distribution.
+// Agency Analytics & KPI Hub — Real API data integration with loading skeletons and 0-data screen.
 
-import { useState, useMemo, Suspense } from 'react'
+import { useState, useMemo, useEffect, Suspense } from 'react'
 import Link from 'next/link'
 import { ContentWrapper } from '@/components/layout/ContentWrapper'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { Card, CardHeader, Badge, Button, PageLoader } from '@/components/ui'
 import {
-  mockProjects,
-  mockClients,
-  mockEmployees,
-  mockCategories,
-  mockFollowUps,
-  mockDoubts,
-} from '@/lib/mock-data'
+  Card,
+  CardHeader,
+  Badge,
+  Button,
+  PageLoader,
+  MetricCardSkeleton,
+  CardSkeleton,
+  EmptyState,
+} from '@/components/ui'
+import { api } from '@/lib/api'
+import type {
+  Project,
+  Client,
+  Employee,
+  ServiceCategory,
+  FollowUp,
+  Doubt,
+} from '@/lib/types'
 import {
   TrendingUp,
   DollarSign,
@@ -29,6 +39,7 @@ import {
   PieChart,
   BarChart2,
   Phone,
+  AlertCircle,
 } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/utils'
 
@@ -42,55 +53,121 @@ export default function AdminAnalyticsPage() {
 
 function AdminAnalyticsContent() {
   const [timeRange, setTimeRange] = useState<'month' | 'quarter' | 'year' | 'all'>('quarter')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  // Financial calculations
-  const totalRevenue = useMemo(() => {
-    return mockProjects.reduce((sum, p) => sum + p.budget, 0)
+  const [projects, setProjects] = useState<Project[]>([])
+  const [clients, setClients] = useState<Client[]>([])
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [categories, setCategories] = useState<ServiceCategory[]>([])
+  const [followups, setFollowups] = useState<FollowUp[]>([])
+
+  useEffect(() => {
+    let mounted = true
+    setLoading(true)
+    setError(null)
+
+    Promise.allSettled([
+      api.projects.list({ limit: 100 }),
+      api.clients.list({ limit: 100 }),
+      api.employees.list(),
+      api.settings.getCategories(),
+      api.followups.list({ limit: 100 }),
+    ])
+      .then(([projRes, clientRes, empRes, catRes, fuRes]) => {
+        if (!mounted) return
+
+        if (projRes.status === 'fulfilled') {
+          setProjects(projRes.value?.projects || [])
+        } else {
+          setError('Failed to fetch agency financial metrics from server')
+        }
+
+        if (clientRes.status === 'fulfilled') setClients(clientRes.value?.clients || [])
+        if (empRes.status === 'fulfilled') setEmployees(empRes.value || [])
+        if (catRes.status === 'fulfilled') setCategories(catRes.value || [])
+        if (fuRes.status === 'fulfilled') setFollowups(fuRes.value?.followups || [])
+      })
+      .finally(() => {
+        if (mounted) setLoading(false)
+      })
+
+    return () => {
+      mounted = false
+    }
   }, [])
+
+  // Financial calculations from real projects
+  const totalRevenue = useMemo(() => {
+    return projects.reduce((sum, p) => sum + p.budget, 0)
+  }, [projects])
 
   const totalCost = useMemo(() => {
-    return mockProjects.reduce((sum, p) => sum + (p.actualCost || 0), 0)
-  }, [])
+    return projects.reduce((sum, p) => sum + (p.actualCost || 0), 0)
+  }, [projects])
 
   const netProfit = totalRevenue - totalCost
   const profitMargin = totalRevenue > 0 ? Math.round((netProfit / totalRevenue) * 100) : 0
 
-  // Month-by-month financial bar data (simulated agency trend)
-  const monthlyTrends = [
-    { month: 'Aug 2026', revenue: 180000, cost: 95000, profit: 85000 },
-    { month: 'Sep 2026', revenue: 240000, cost: 110000, profit: 130000 },
-    { month: 'Oct 2026', revenue: 310000, cost: 140000, profit: 170000 },
-    { month: 'Nov 2026', revenue: 330000, cost: 132000, profit: 198000 },
-  ]
-  const maxRevenueTrend = Math.max(...monthlyTrends.map((t) => t.revenue))
+  // Month-by-month financial bar data
+  const monthlyTrends = useMemo(() => {
+    const monthMap = new Map<string, { revenue: number; cost: number; profit: number }>()
+    projects.forEach((p) => {
+      const d = new Date(p.deliveryDate || p.createdAt)
+      const key = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+      const existing = monthMap.get(key) || { revenue: 0, cost: 0, profit: 0 }
+      existing.revenue += p.budget
+      existing.cost += p.actualCost || 0
+      existing.profit = existing.revenue - existing.cost
+      monthMap.set(key, existing)
+    })
+
+    if (monthMap.size === 0) {
+      return [
+        { month: 'Current Period', revenue: totalRevenue, cost: totalCost, profit: netProfit },
+      ]
+    }
+
+    return Array.from(monthMap.entries()).map(([month, data]) => ({
+      month,
+      revenue: data.revenue,
+      cost: data.cost,
+      profit: data.profit,
+    }))
+  }, [projects, totalRevenue, totalCost, netProfit])
+
+  const maxRevenueTrend = useMemo(
+    () => Math.max(1, ...monthlyTrends.map((t) => t.revenue)),
+    [monthlyTrends],
+  )
 
   // Service Category Breakdown
   const categoryStats = useMemo(() => {
     const map = new Map<string, { count: number; totalBudget: number }>()
-    mockCategories.forEach((c) => map.set(c.id, { count: 0, totalBudget: 0 }))
+    categories.forEach((c) => map.set(c.id, { count: 0, totalBudget: 0 }))
 
-    mockProjects.forEach((p) => {
-      p.serviceCategories.forEach((catId) => {
+    projects.forEach((p) => {
+      p.serviceCategories?.forEach((catId) => {
         const existing = map.get(catId)
         if (existing) {
           existing.count += 1
-          existing.totalBudget += p.budget / p.serviceCategories.length
+          existing.totalBudget += p.budget / (p.serviceCategories.length || 1)
         }
       })
     })
 
-    return mockCategories.map((c) => ({
+    return categories.map((c) => ({
       name: c.name,
       color: c.color,
       count: map.get(c.id)?.count || 0,
       totalBudget: map.get(c.id)?.totalBudget || 0,
     }))
-  }, [])
+  }, [categories, projects])
 
   // Client Retention Stats
   const clientRetention = useMemo(() => {
     const clientProjectsCount = new Map<string, number>()
-    mockProjects.forEach((p) => {
+    projects.forEach((p) => {
       clientProjectsCount.set(
         p.clientId,
         (clientProjectsCount.get(p.clientId) || 0) + 1,
@@ -98,70 +175,59 @@ function AdminAnalyticsContent() {
     })
 
     let returning = 0
-    let single = 0
     clientProjectsCount.forEach((count) => {
       if (count > 1) returning += 1
-      else single += 1
     })
 
-    const totalClientsWithProjects = clientProjectsCount.size
+    const totalClientsCount = clients.length
     const retentionRate =
-      totalClientsWithProjects > 0
-        ? Math.round((returning / totalClientsWithProjects) * 100)
-        : 0
+      totalClientsCount > 0 ? Math.round((returning / totalClientsCount) * 100) : 0
 
-    // Top Clients by Value
-    const topClients = mockClients
+    const topClients = clients
       .map((c) => {
-        const clientProjects = mockProjects.filter((p) => p.clientId === c.id)
-        const totalValue = clientProjects.reduce((sum, p) => sum + p.budget, 0)
+        const cProjects = projects.filter((p) => p.clientId === c.id)
+        const totalVal = cProjects.reduce((sum, p) => sum + p.budget, 0)
         return {
           id: c.id,
+          name: c.fullName,
           company: c.companyName,
-          contact: c.fullName,
-          projectCount: clientProjects.length,
-          totalValue,
+          projectsCount: cProjects.length,
+          totalValue: totalVal,
         }
       })
       .sort((a, b) => b.totalValue - a.totalValue)
-      .slice(0, 4)
+      .slice(0, 5)
 
-    return { returning, single, retentionRate, topClients }
-  }, [])
+    return { returning, retentionRate, topClients }
+  }, [clients, projects])
 
-  // Staff Performance Index
-  const staffPerformance = useMemo(() => {
-    return mockEmployees.map((emp) => {
-      const assigned = mockProjects.filter(
+  // Employee Performance Leaderboard
+  const employeePerformance = useMemo(() => {
+    return employees.map((emp) => {
+      const assigned = projects.filter(
         (p) =>
-          p.primaryEmployeeId === emp.id || p.additionalMemberIds.includes(emp.id),
+          p.primaryEmployeeId === emp.id || p.additionalMemberIds?.includes(emp.id),
       )
-      const completed = assigned.filter(
-        (p) => p.status === 'completed' || p.status === 'delivered',
-      ).length
-      const openDoubts = mockDoubts.filter(
-        (d) => d.raisedById === emp.id && d.status === 'open',
-      ).length
-
-      // Simulated on-time delivery rate
-      const onTimeRate = assigned.length > 0 ? 92 : 100
+      const delivered = assigned.filter((p) => p.status === 'delivered')
+      const totalBudgetHandled = assigned.reduce((sum, p) => sum + p.budget, 0)
+      const onTimeRate =
+        assigned.length > 0 ? Math.round((delivered.length / assigned.length) * 100) : 100
 
       return {
         id: emp.id,
         name: emp.fullName,
-        role: emp.designation,
-        payType: emp.payType,
-        total: assigned.length,
-        completed,
-        openDoubts,
+        designation: emp.designation,
+        totalProjects: assigned.length,
+        deliveredCount: delivered.length,
+        totalBudgetHandled,
         onTimeRate,
       }
     })
-  }, [])
+  }, [employees, projects])
 
-  // Follow-up Completion Rate
-  const totalFollowups = mockFollowUps.length
-  const completedFollowups = mockFollowUps.filter((f) => f.status === 'done').length
+  // Follow-up Completion Rate from real followups
+  const totalFollowups = followups.length
+  const completedFollowups = followups.filter((f) => f.status === 'done').length
   const followUpRate =
     totalFollowups > 0 ? Math.round((completedFollowups / totalFollowups) * 100) : 0
 
@@ -195,49 +261,71 @@ function AdminAnalyticsContent() {
         }
       />
 
+      {error && (
+        <div className="mb-6 p-4 rounded-xl bg-danger-light border border-danger/30 text-danger-dark flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-5 w-5 flex-shrink-0" />
+            <span className="text-sm font-medium">{error}</span>
+          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => window.location.reload()}
+          >
+            Retry
+          </Button>
+        </div>
+      )}
+
       {/* Top Level Financial Scorecards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        <Card padding="md">
-          <p className="text-xs text-text-muted">Total Gross Billings</p>
-          <p className="text-2xl font-bold text-text-primary mt-1">
-            {formatCurrency(totalRevenue)}
-          </p>
-          <div className="flex items-center gap-1 text-[11px] text-success mt-0.5">
-            <TrendingUp className="h-3.5 w-3.5" />
-            <span>+18.4% vs last period</span>
-          </div>
-        </Card>
+        {loading ? (
+          Array.from({ length: 4 }).map((_, i) => <MetricCardSkeleton key={i} />)
+        ) : (
+          <>
+            <Card padding="md">
+              <p className="text-xs text-text-muted">Total Gross Billings</p>
+              <p className="text-2xl font-bold text-text-primary mt-1">
+                {formatCurrency(totalRevenue)}
+              </p>
+              <div className="flex items-center gap-1 text-[11px] text-success mt-0.5">
+                <TrendingUp className="h-3.5 w-3.5" />
+                <span>Across all deliverables</span>
+              </div>
+            </Card>
 
-        <Card padding="md">
-          <p className="text-xs text-text-muted">Direct Operational Costs</p>
-          <p className="text-2xl font-bold text-text-secondary mt-1">
-            {formatCurrency(totalCost)}
-          </p>
-          <p className="text-[11px] text-text-muted mt-0.5">
-            Ad spend, tools & contractor fees
-          </p>
-        </Card>
+            <Card padding="md">
+              <p className="text-xs text-text-muted">Direct Operational Costs</p>
+              <p className="text-2xl font-bold text-text-secondary mt-1">
+                {formatCurrency(totalCost)}
+              </p>
+              <p className="text-[11px] text-text-muted mt-0.5">
+                Ad spend, tools & contractor fees
+              </p>
+            </Card>
 
-        <Card padding="md">
-          <p className="text-xs text-text-muted">Net Operating Profit</p>
-          <p className="text-2xl font-bold text-success-dark mt-1">
-            {formatCurrency(netProfit)}
-          </p>
-          <div className="flex items-center gap-1 text-[11px] text-success-dark mt-0.5">
-            <Award className="h-3.5 w-3.5" />
-            <span>{profitMargin}% Profit Margin</span>
-          </div>
-        </Card>
+            <Card padding="md">
+              <p className="text-xs text-text-muted">Net Operating Profit</p>
+              <p className="text-2xl font-bold text-success-dark mt-1">
+                {formatCurrency(netProfit)}
+              </p>
+              <div className="flex items-center gap-1 text-[11px] text-success-dark mt-0.5">
+                <Award className="h-3.5 w-3.5" />
+                <span>{profitMargin}% Profit Margin</span>
+              </div>
+            </Card>
 
-        <Card padding="md">
-          <p className="text-xs text-text-muted">Client Retention Index</p>
-          <p className="text-2xl font-bold text-brand-700 mt-1">
-            {clientRetention.retentionRate}%
-          </p>
-          <p className="text-[11px] text-text-muted mt-0.5">
-            {clientRetention.returning} recurring accounts
-          </p>
-        </Card>
+            <Card padding="md">
+              <p className="text-xs text-text-muted">Client Retention Index</p>
+              <p className="text-2xl font-bold text-brand-700 mt-1">
+                {clientRetention.retentionRate}%
+              </p>
+              <p className="text-[11px] text-text-muted mt-0.5">
+                {clientRetention.returning} recurring accounts
+              </p>
+            </Card>
+          </>
+        )}
       </div>
 
       {/* Month-by-Month Revenue vs Profit Growth Chart */}
@@ -352,7 +440,7 @@ function AdminAnalyticsContent() {
                       {c.company}
                     </Link>
                     <p className="text-[11px] text-text-muted truncate">
-                      {c.contact} • {c.projectCount} projects
+                      {c.name} • {c.projectsCount} projects
                     </p>
                   </div>
                 </div>
@@ -389,7 +477,7 @@ function AdminAnalyticsContent() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border text-xs">
-              {staffPerformance.map((emp) => (
+              {employeePerformance.map((emp) => (
                 <tr key={emp.id} className="hover:bg-surface/60">
                   <td className="px-4 py-3 font-semibold text-text-primary">
                     <Link
@@ -399,26 +487,17 @@ function AdminAnalyticsContent() {
                       {emp.name}
                     </Link>
                   </td>
-                  <td className="px-3 py-3 text-text-muted">{emp.role}</td>
+                  <td className="px-3 py-3 text-text-muted">{emp.designation}</td>
                   <td className="px-3 py-3 text-center capitalize">
-                    <Badge
-                      variant={
-                        emp.payType === 'salary'
-                          ? 'blue'
-                          : emp.payType === 'intern'
-                          ? 'purple'
-                          : 'amber'
-                      }
-                      size="sm"
-                    >
-                      {emp.payType}
+                    <Badge variant="blue" size="sm">
+                      Active
                     </Badge>
                   </td>
                   <td className="px-3 py-3 text-center font-semibold text-text-primary">
-                    {emp.total}
+                    {emp.totalProjects}
                   </td>
                   <td className="px-3 py-3 text-center text-success-dark font-medium">
-                    {emp.completed}
+                    {emp.deliveredCount}
                   </td>
                   <td className="px-3 py-3 text-center">
                     <span className="font-semibold text-text-primary">
@@ -426,13 +505,9 @@ function AdminAnalyticsContent() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    {emp.openDoubts > 0 ? (
-                      <Badge variant="amber" size="sm">
-                        {emp.openDoubts} open
-                      </Badge>
-                    ) : (
-                      <span className="text-text-muted">0</span>
-                    )}
+                    <span className="font-semibold text-text-primary">
+                      {formatCurrency(emp.totalBudgetHandled)}
+                    </span>
                   </td>
                 </tr>
               ))}

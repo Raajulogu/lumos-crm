@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { Mail, ArrowLeft, CheckCircle } from 'lucide-react'
 import { Input, Button, Card } from '@/components/ui'
 import { APP_NAME } from '@/lib/constants'
+import { api } from '@/lib/api'
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('')
@@ -13,7 +14,7 @@ export default function ForgotPasswordPage() {
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState('')
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
     if (!email) {
@@ -21,11 +22,14 @@ export default function ForgotPasswordPage() {
       return
     }
     setIsLoading(true)
-    // TODO: Replace with real password reset API call
-    setTimeout(() => {
-      setIsLoading(false)
+    try {
+      await api.auth.forgotPassword(email)
       setSubmitted(true)
-    }, 1000)
+    } catch (err: any) {
+      setError(err?.message || 'Failed to send reset link. Please check the email and try again.')
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   return (

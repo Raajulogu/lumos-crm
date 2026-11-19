@@ -1,14 +1,24 @@
 'use client'
 
 // app/employee/dashboard/page.tsx
-// Employee Dashboard — overview of assigned work, deadlines, doubts, and follow-ups.
+// Employee Dashboard — Connected to live backend API with skeletons and 0-data screen.
 
-import { Suspense } from 'react'
+import { useState, useMemo, useEffect, Suspense } from 'react'
 import Link from 'next/link'
 import { ContentWrapper } from '@/components/layout/ContentWrapper'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { Card, CardHeader, Badge, Button, PageLoader } from '@/components/ui'
-import { mockProjects, mockDoubts, mockFollowUps, mockClients } from '@/lib/mock-data'
+import {
+  Card,
+  CardHeader,
+  Badge,
+  Button,
+  PageLoader,
+  MetricCardSkeleton,
+  TableSkeleton,
+  EmptyState,
+} from '@/components/ui'
+import { api } from '@/lib/api'
+import type { Project, Client, Doubt, FollowUp } from '@/lib/types'
 import {
   Briefcase,
   AlertTriangle,
@@ -16,6 +26,9 @@ import {
   MessageCircle,
   Phone,
   ArrowRight,
+  AlertCircle,
+  CheckCircle2,
+  Clock,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import {
@@ -41,27 +54,83 @@ function EmployeeDashboardContent() {
   const currentEmpId = currentUser.role === 'employee' ? currentUser.id : 'emp-1'
   const isDemoAdminPreview = currentUser.role === 'admin'
 
-  // Filter projects assigned to this employee (primary or member)
-  const myProjects = mockProjects.filter(
-    (p) =>
-      p.primaryEmployeeId === currentEmpId ||
-      p.additionalMemberIds.includes(currentEmpId),
+  const [projects, setProjects] = useState<Project[]>([])
+  const [clients, setClients] = useState<Client[]>([])
+  const [followups, setFollowups] = useState<FollowUp[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let mounted = true
+    setLoading(true)
+    setError(null)
+
+    Promise.allSettled([
+      api.projects.list({ limit: 100 }),
+      api.clients.list({ limit: 100 }).catch(() => ({ clients: [] })),
+      api.followups.list({ limit: 50 }),
+    ])
+      .then(([projRes, clientRes, fuRes]) => {
+        if (!mounted) return
+
+        if (projRes.status === 'fulfilled') {
+          setProjects(projRes.value?.projects || [])
+        } else {
+          setError('Failed to fetch assigned deliverables from server')
+        }
+
+        if (clientRes.status === 'fulfilled') {
+          setClients(clientRes.value?.clients || [])
+        }
+
+        if (fuRes.status === 'fulfilled') {
+          setFollowups(fuRes.value?.followups || [])
+        }
+      })
+      .finally(() => {
+        if (mounted) setLoading(false)
+      })
+
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  // Filter projects assigned to this employee (if employee token, backend already filters)
+  const myProjects = useMemo(() => {
+    return projects.filter(
+      (p) =>
+        p.primaryEmployeeId === currentEmpId ||
+        p.additionalMemberIds?.includes(currentEmpId) ||
+        isDemoAdminPreview,
+    )
+  }, [projects, currentEmpId, isDemoAdminPreview])
+
+  const activeProjects = useMemo(
+    () => myProjects.filter((p) => p.status !== 'delivered'),
+    [myProjects],
+  )
+  const overdueProjects = useMemo(
+    () => activeProjects.filter((p) => isOverdue(p.deliveryDate, p.status)),
+    [activeProjects],
+  )
+  const upcomingDeadlines = useMemo(
+    () =>
+      activeProjects.filter((p) => {
+        const days = getDaysUntil(p.deliveryDate)
+        return days >= 0 && days <= 7
+      }),
+    [activeProjects],
   )
 
-  const activeProjects = myProjects.filter((p) => p.status !== 'delivered')
-  const overdueProjects = activeProjects.filter((p) =>
-    isOverdue(p.deliveryDate, p.status),
-  )
-  const upcomingDeadlines = activeProjects.filter((p) => {
-    const days = getDaysUntil(p.deliveryDate)
-    return days >= 0 && days <= 7
-  })
-
-  const myDoubts = mockDoubts.filter((d) => d.raisedById === currentEmpId)
-  const openDoubts = myDoubts.filter((d) => d.status === 'open')
-
-  const myFollowUps = mockFollowUps.filter(
-    (f) => f.assignedToId === currentEmpId && f.status === 'pending',
+  const myFollowUps = useMemo(
+    () =>
+      followups.filter(
+        (f) =>
+          (f.assignedToId === currentEmpId || isDemoAdminPreview) &&
+          f.status === 'pending',
+      ),
+    [followups, currentEmpId, isDemoAdminPreview],
   )
 
   const statCards = [
@@ -87,13 +156,6 @@ function EmployeeDashboardContent() {
       bg: 'bg-warning-light',
     },
     {
-      label: 'Open Doubts',
-      value: openDoubts.length,
-      icon: MessageCircle,
-      color: 'text-purple-dark',
-      bg: 'bg-purple-light',
-    },
-    {
       label: 'Pending Follow-ups',
       value: myFollowUps.length,
       icon: Phone,
@@ -103,12 +165,18 @@ function EmployeeDashboardContent() {
   ]
 
   // Map clients safely: employee only gets client name and company name (no email, phone, or address)
-  const clientMap = new Map(
-    mockClients.map((c) => [c.id, { name: c.fullName, company: c.companyName }]),
+  const clientMap = useMemo(
+    () =>
+      new Map(
+        clients.map((c) => [c.id, { name: c.fullName, company: c.companyName }]),
+      ),
+    [clients],
   )
 
   const activeEmployeeName = isDemoAdminPreview ? 'Priya Sharma' : currentUser.fullName
-  const activeEmployeeRole = isDemoAdminPreview ? 'Senior SEO & Content Lead' : currentUser.designation
+  const activeEmployeeRole = isDemoAdminPreview
+    ? 'Senior SEO & Content Lead'
+    : currentUser.designation
 
   return (
     <ContentWrapper>
@@ -155,20 +223,40 @@ function EmployeeDashboardContent() {
         }
       />
 
-      {/* Top Stat Cards — Mobile: 2 cols, Tablet: 3 cols, Desktop: 5 cols */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
-        {statCards.map((card) => {
-          const Icon = card.icon
-          return (
-            <Card key={card.label} padding="md" hover>
-              <div className={`inline-flex p-2 rounded-lg ${card.bg} mb-3`}>
-                <Icon className={`h-5 w-5 ${card.color}`} />
-              </div>
-              <p className="text-2xl font-bold text-text-primary">{card.value}</p>
-              <p className="text-xs text-text-muted mt-0.5 leading-snug">{card.label}</p>
-            </Card>
-          )
-        })}
+      {error && (
+        <div className="mb-6 p-4 rounded-xl bg-danger-light border border-danger/30 text-danger-dark flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-5 w-5 flex-shrink-0" />
+            <span className="text-sm font-medium">{error}</span>
+          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => window.location.reload()}
+          >
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {/* Top Stat Cards */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 mb-6">
+        {loading
+          ? Array.from({ length: 4 }).map((_, i) => <MetricCardSkeleton key={i} />)
+          : statCards.map((card) => {
+              const Icon = card.icon
+              return (
+                <Card key={card.label} padding="md" hover>
+                  <div className={`inline-flex p-2 rounded-lg ${card.bg} mb-3`}>
+                    <Icon className={`h-5 w-5 ${card.color}`} />
+                  </div>
+                  <p className="text-2xl font-bold text-text-primary">{card.value}</p>
+                  <p className="text-xs text-text-muted mt-0.5 leading-snug">
+                    {card.label}
+                  </p>
+                </Card>
+              )
+            })}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
@@ -183,21 +271,29 @@ function EmployeeDashboardContent() {
                   href="/employee/projects"
                   className="text-xs text-brand-600 hover:text-brand-700 font-medium inline-flex items-center gap-1"
                 >
-                  See all <ArrowRight className="h-3 w-3" />
+                  View all <ArrowRight className="h-3 w-3" />
                 </Link>
               }
             />
 
-            <div className="divide-y divide-border">
-              {myProjects.length === 0 ? (
-                <p className="text-sm text-text-muted py-6 text-center">
-                  No projects currently assigned to you.
+            {loading ? (
+              <TableSkeleton rows={4} cols={3} />
+            ) : activeProjects.length === 0 ? (
+              <div className="py-12 text-center text-xs text-text-muted">
+                <Briefcase className="h-10 w-10 text-slate-300 mx-auto mb-2" />
+                <p className="font-semibold text-text-primary text-sm">
+                  0 Active Projects Assigned
                 </p>
-              ) : (
-                myProjects.map((proj) => {
+                <p className="mt-1">
+                  When new accounts are delegated by the Agency Director, they will appear here.
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y divide-border">
+                {activeProjects.map((proj) => {
                   const client = clientMap.get(proj.clientId)
-                  const daysLeft = getDaysUntil(proj.deliveryDate)
                   const isLate = isOverdue(proj.deliveryDate, proj.status)
+                  const daysLeft = getDaysUntil(proj.deliveryDate)
 
                   return (
                     <div
@@ -206,9 +302,12 @@ function EmployeeDashboardContent() {
                     >
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="text-sm font-semibold text-text-primary truncate">
+                          <Link
+                            href={`/employee/projects/${proj.id}`}
+                            className="text-sm font-semibold text-text-primary hover:text-brand-600 truncate"
+                          >
                             {proj.name}
-                          </h4>
+                          </Link>
                           <span
                             className={`px-2 py-0.5 rounded-full text-xs font-medium ${getStatusColor(
                               proj.status,
@@ -225,121 +324,111 @@ function EmployeeDashboardContent() {
                           </span>
                         </div>
 
-                        {/* Restricted Client Info (Name + Company Only) */}
-                        <p className="text-xs text-text-secondary mt-1">
-                          Client: <span className="font-medium text-text-primary">{client?.company || 'N/A'}</span>
-                          {client?.name && ` (${client.name})`}
-                        </p>
+                        <div className="flex items-center gap-3 text-xs text-text-secondary mt-1">
+                          <span>
+                            Client:{' '}
+                            <strong className="text-text-primary">
+                              {client?.company || 'Client'}
+                            </strong>
+                          </span>
+                        </div>
                       </div>
 
                       <div className="flex items-center gap-3 self-end sm:self-center flex-shrink-0">
                         <div className="text-right">
-                          <p className="text-xs text-text-muted">Deadline</p>
+                          <p className="text-xs text-text-muted">Delivery Due</p>
                           <p
                             suppressHydrationWarning
-                            className={`text-xs font-medium ${
+                            className={`text-xs font-semibold ${
                               isLate ? 'text-danger' : 'text-text-primary'
                             }`}
                           >
                             {formatDate(proj.deliveryDate)}
-                            {isLate && ' (Overdue)'}
-                            {!isLate && daysLeft <= 3 && ` (${daysLeft}d left)`}
+                            {isLate
+                              ? ' (Overdue)'
+                              : daysLeft <= 3
+                              ? ` (${daysLeft}d left)`
+                              : ''}
                           </p>
                         </div>
 
                         <Link href={`/employee/projects/${proj.id}`}>
                           <Button variant="secondary" size="sm">
-                            Open
+                            Open Workspace
                           </Button>
                         </Link>
                       </div>
                     </div>
                   )
-                })
-              )}
-            </div>
+                })}
+              </div>
+            )}
           </Card>
         </div>
 
-        {/* Sidebar widgets: Doubts & Pending Follow-ups */}
-        <div className="space-y-6">
-          {/* Open Doubts Card */}
+        {/* Right Column: Pending Follow-ups */}
+        <div>
           <Card padding="md">
             <CardHeader
-              title="My Doubts"
-              description="Questions submitted to admin"
+              title="My Follow-ups"
+              description="Calls & check-ins assigned to you"
+              action={
+                <Link
+                  href="/employee/followups"
+                  className="text-xs text-brand-600 hover:text-brand-700 font-medium inline-flex items-center gap-1"
+                >
+                  All <ArrowRight className="h-3 w-3" />
+                </Link>
+              }
             />
-            <div className="space-y-3">
-              {openDoubts.length === 0 ? (
-                <p className="text-xs text-text-muted py-2">
-                  No open doubts pending.
-                </p>
-              ) : (
-                openDoubts.map((doubt) => (
-                  <div
-                    key={doubt.id}
-                    className="p-3 rounded-lg border border-border bg-surface text-xs space-y-1.5"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold text-text-primary truncate">
-                        {doubt.subject}
-                      </span>
-                      <Badge
-                        variant={doubt.priority === 'urgent' ? 'red' : 'amber'}
-                        size="sm"
-                      >
-                        {doubt.priority}
-                      </Badge>
-                    </div>
-                    <p className="text-text-secondary line-clamp-2">
-                      {doubt.description}
-                    </p>
-                    {doubt.adminReply && (
-                      <div className="mt-2 pt-2 border-t border-border text-brand-700 bg-brand-50 p-2 rounded">
-                        <p className="font-medium">Admin reply:</p>
-                        <p className="line-clamp-2">{doubt.adminReply}</p>
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </Card>
 
-          {/* Pending Follow-ups */}
-          <Card padding="md">
-            <CardHeader
-              title="Upcoming Follow-ups"
-              description="Calls and client communications"
-            />
-            <div className="space-y-3">
-              {myFollowUps.length === 0 ? (
-                <p className="text-xs text-text-muted py-2">
-                  No pending follow-ups.
-                </p>
-              ) : (
-                myFollowUps.map((item) => (
-                  <div
-                    key={item.id}
-                    className="p-3 rounded-lg border border-border bg-surface text-xs space-y-1"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold text-text-primary">
-                        {formatDate(item.scheduledAt)}
-                      </span>
-                      <Badge variant="green" size="sm">
-                        Pending
-                      </Badge>
+            {loading ? (
+              <TableSkeleton rows={3} cols={2} />
+            ) : myFollowUps.length === 0 ? (
+              <div className="py-8 text-center text-xs text-text-muted">
+                <Phone className="h-7 w-7 text-slate-300 mx-auto mb-2" />
+                <p className="font-medium text-text-primary">0 Follow-ups Pending</p>
+                <p className="mt-0.5">You have no upcoming client calls scheduled.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {myFollowUps.map((fu) => {
+                  const client = clientMap.get(fu.clientId)
+
+                  return (
+                    <div
+                      key={fu.id}
+                      className="p-3 rounded-lg border border-border bg-surface text-xs space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-text-primary truncate">
+                          {client?.company || 'Client'}
+                        </span>
+                        <span className="text-[11px] text-text-muted flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          {formatDate(fu.scheduledAt)}
+                        </span>
+                      </div>
+
+                      {fu.notes && (
+                        <p className="text-text-secondary line-clamp-2">{fu.notes}</p>
+                      )}
+
+                      <div className="flex items-center justify-between pt-1 border-t border-border/60">
+                        <Badge variant="green" size="sm">
+                          Pending
+                        </Badge>
+                        <Link href="/employee/followups">
+                          <Button variant="ghost" size="sm" className="h-6 text-[11px]">
+                            View
+                          </Button>
+                        </Link>
+                      </div>
                     </div>
-                    {item.notes && (
-                      <p className="text-text-secondary line-clamp-2">
-                        {item.notes}
-                      </p>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
+                  )
+                })}
+              </div>
+            )}
           </Card>
         </div>
       </div>

@@ -3,7 +3,7 @@
 // app/admin/projects/[id]/page.tsx
 // Admin Project Detail — 5-stage pipeline status changer, financial profit audit, doubts resolution thread, follow-ups, and notes.
 
-import { useState, useMemo, Suspense } from 'react'
+import { useState, useMemo, useEffect, Suspense } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ContentWrapper } from '@/components/layout/ContentWrapper'
@@ -18,17 +18,23 @@ import {
   Modal,
   Tabs,
   PageLoader,
+  CardSkeleton,
+  TableSkeleton,
 } from '@/components/ui'
 import { ProjectPipelineStepper } from '@/components/common'
-import {
-  mockProjects,
-  mockClients,
-  mockEmployees,
-  mockCategories,
-  mockDoubts,
-  mockFollowUps,
-  mockNotes,
-} from '@/lib/mock-data'
+import { api } from '@/lib/api'
+import type {
+  Project,
+  Client,
+  Employee,
+  ServiceCategory,
+  Doubt,
+  FollowUp,
+  Note,
+  ProjectStatus,
+  ProjectPriority,
+  DoubtPriority,
+} from '@/lib/types'
 import {
   Briefcase,
   Building2,
@@ -61,7 +67,6 @@ import {
   isOverdue,
   generateId,
 } from '@/lib/utils'
-import type { ProjectStatus, ProjectPriority, DoubtPriority } from '@/lib/types'
 
 export default function AdminProjectDetailPage() {
   return (
@@ -76,46 +81,103 @@ function AdminProjectDetailContent() {
   const router = useRouter()
   const projectId = params?.id as string
 
-  // Project state
-  const initialProject = mockProjects.find((p) => p.id === projectId)
-  const [project, setProject] = useState(initialProject)
+  const [loading, setLoading] = useState(true)
+  const [project, setProject] = useState<Project | null>(null)
+  const [clients, setClients] = useState<Client[]>([])
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [categories, setCategories] = useState<ServiceCategory[]>([])
 
   // Local state for tabs
   const [activeTab, setActiveTab] = useState('overview')
 
   // Doubts state
-  const [projectDoubts, setProjectDoubts] = useState(
-    mockDoubts.filter((d) => d.projectId === projectId),
-  )
+  const [projectDoubts, setProjectDoubts] = useState<Doubt[]>([])
   const [replyingDoubtId, setReplyingDoubtId] = useState<string | null>(null)
   const [replyText, setReplyText] = useState('')
 
   // Follow-ups state
-  const [projectFollowUps, setProjectFollowUps] = useState(
-    mockFollowUps.filter((f) => f.projectId === projectId),
-  )
+  const [projectFollowUps, setProjectFollowUps] = useState<FollowUp[]>([])
   const [isFollowupModalOpen, setIsFollowupModalOpen] = useState(false)
   const [followupDate, setFollowupDate] = useState('')
   const [followupNotes, setFollowupNotes] = useState('')
   const [followupAssignee, setFollowupAssignee] = useState('admin')
 
   // Notes state
-  const [projectNotes, setProjectNotes] = useState(
-    mockNotes.filter((n) => n.projectId === projectId),
-  )
+  const [projectNotes, setProjectNotes] = useState<Note[]>([])
   const [newNote, setNewNote] = useState('')
 
   // Financial Edit Modal
   const [isFinancialModalOpen, setIsFinancialModalOpen] = useState(false)
-  const [editBudget, setEditBudget] = useState(project?.budget?.toString() || '0')
-  const [editCost, setEditCost] = useState(project?.actualCost?.toString() || '0')
+  const [editBudget, setEditBudget] = useState('0')
+  const [editCost, setEditCost] = useState('0')
+
+  useEffect(() => {
+    let mounted = true
+    setLoading(true)
+
+    Promise.allSettled([
+      api.projects.getById(projectId),
+      api.clients.list({ limit: 100 }),
+      api.employees.list(),
+      api.settings.getCategories(),
+      api.doubts.listByProject(projectId),
+      api.notes.listByProject(projectId),
+      api.followups.list({ limit: 100 }),
+    ])
+      .then(([projRes, clientRes, empRes, catRes, doubtRes, noteRes, fuRes]) => {
+        if (!mounted) return
+
+        if (projRes.status === 'fulfilled' && projRes.value) {
+          const p = projRes.value
+          setProject(p)
+          setEditBudget(p.budget?.toString() || '0')
+          setEditCost(p.actualCost?.toString() || '0')
+        }
+
+        if (clientRes.status === 'fulfilled') setClients(clientRes.value?.clients || [])
+        if (empRes.status === 'fulfilled') setEmployees(empRes.value || [])
+        if (catRes.status === 'fulfilled') setCategories(catRes.value || [])
+        if (doubtRes.status === 'fulfilled') setProjectDoubts(doubtRes.value || [])
+        if (noteRes.status === 'fulfilled') setProjectNotes(noteRes.value || [])
+
+        if (fuRes.status === 'fulfilled') {
+          const matching = (fuRes.value?.followups || []).filter(
+            (f) => f.projectId === projectId,
+          )
+          setProjectFollowUps(matching)
+        }
+      })
+      .finally(() => {
+        if (mounted) setLoading(false)
+      })
+
+    return () => {
+      mounted = false
+    }
+  }, [projectId])
 
   // Lookup data
-  const client = project ? mockClients.find((c) => c.id === project.clientId) : null
+  const client = project ? clients.find((c) => c.id === project.clientId) : null
   const primaryEmp = project?.primaryEmployeeId
-    ? mockEmployees.find((e) => e.id === project.primaryEmployeeId)
+    ? employees.find((e) => e.id === project.primaryEmployeeId)
     : null
-  const categoryMap = useMemo(() => new Map(mockCategories.map((c) => [c.id, c])), [])
+  const categoryMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
+
+  if (loading) {
+    return (
+      <ContentWrapper>
+        <div className="space-y-6">
+          <CardSkeleton rows={2} />
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <CardSkeleton key={i} rows={2} />
+            ))}
+          </div>
+          <TableSkeleton rows={4} cols={4} />
+        </div>
+      </ContentWrapper>
+    )
+  }
 
   if (!project) {
     return (
@@ -137,13 +199,16 @@ function AdminProjectDetailContent() {
   }
 
   // Update Status
-  function handleStatusChange(newStatus: ProjectStatus) {
+  async function handleStatusChange(newStatus: ProjectStatus) {
     const updated = { ...project!, status: newStatus, updatedAt: new Date().toISOString() }
     setProject(updated)
+    try {
+      await api.projects.updateStatus(project!.id, newStatus)
+    } catch {}
   }
 
   // Update Financials
-  function handleSaveFinancials(e: React.FormEvent) {
+  async function handleSaveFinancials(e: React.FormEvent) {
     e.preventDefault()
     const updated = {
       ...project!,
@@ -153,10 +218,17 @@ function AdminProjectDetailContent() {
     }
     setProject(updated)
     setIsFinancialModalOpen(false)
+
+    try {
+      await api.projects.updateFinancials(project!.id, {
+        budget: Number(editBudget) || 0,
+        actualCost: editCost ? Number(editCost) : undefined,
+      })
+    } catch {}
   }
 
   // Doubts: Submit Reply
-  function handleSubmitReply(doubtId: string) {
+  async function handleSubmitReply(doubtId: string) {
     if (!replyText.trim()) return
     const updatedDoubts = projectDoubts.map((d) => {
       if (d.id === doubtId) {
@@ -169,12 +241,17 @@ function AdminProjectDetailContent() {
       return d
     })
     setProjectDoubts(updatedDoubts)
+    const text = replyText.trim()
     setReplyingDoubtId(null)
     setReplyText('')
+
+    try {
+      await api.doubts.reply(doubtId, text)
+    } catch {}
   }
 
   // Doubts: Resolve
-  function handleResolveDoubt(doubtId: string) {
+  async function handleResolveDoubt(doubtId: string) {
     const updatedDoubts = projectDoubts.map((d) => {
       if (d.id === doubtId) {
         return {
@@ -186,10 +263,14 @@ function AdminProjectDetailContent() {
       return d
     })
     setProjectDoubts(updatedDoubts)
+
+    try {
+      await api.doubts.resolve(doubtId)
+    } catch {}
   }
 
   // Follow-ups: Add
-  function handleCreateFollowup(e: React.FormEvent) {
+  async function handleCreateFollowup(e: React.FormEvent) {
     e.preventDefault()
     if (!followupDate) return
 
@@ -202,21 +283,30 @@ function AdminProjectDetailContent() {
       assignedToName:
         followupAssignee === 'admin'
           ? 'Admin'
-          : mockEmployees.find((e) => e.id === followupAssignee)?.fullName || 'Staff',
+          : employees.find((e) => e.id === followupAssignee)?.fullName || 'Staff',
       notes: followupNotes.trim() || undefined,
       status: 'pending' as const,
       createdAt: new Date().toISOString(),
     }
 
-    mockFollowUps.unshift(newFU)
     setProjectFollowUps([newFU, ...projectFollowUps])
     setIsFollowupModalOpen(false)
     setFollowupDate('')
     setFollowupNotes('')
+
+    try {
+      await api.followups.create({
+        projectId: project!.id,
+        clientId: project!.clientId,
+        scheduledAt: new Date(followupDate).toISOString(),
+        assignedToId: followupAssignee,
+        notes: followupNotes.trim() || undefined,
+      })
+    } catch {}
   }
 
   // Notes: Add
-  function handleAddNote(e: React.FormEvent) {
+  async function handleAddNote(e: React.FormEvent) {
     e.preventDefault()
     if (!newNote.trim()) return
 
@@ -230,9 +320,13 @@ function AdminProjectDetailContent() {
       createdAt: new Date().toISOString(),
     }
 
-    mockNotes.unshift(added)
     setProjectNotes([added, ...projectNotes])
+    const noteText = newNote.trim()
     setNewNote('')
+
+    try {
+      await api.notes.add(project!.id, noteText)
+    } catch {}
   }
 
   // Calculations
@@ -499,7 +593,7 @@ function AdminProjectDetailContent() {
                     <p className="text-text-muted mb-1.5">Collaborators</p>
                     <div className="space-y-1">
                       {project.additionalMemberIds.map((mId) => {
-                        const m = mockEmployees.find((e) => e.id === mId)
+                        const m = employees.find((e: Employee) => e.id === mId)
                         return (
                           <div
                             key={mId}
@@ -536,7 +630,7 @@ function AdminProjectDetailContent() {
             ) : (
               <div className="space-y-4">
                 {projectDoubts.map((doubt) => {
-                  const emp = mockEmployees.find((e) => e.id === doubt.raisedById)
+                  const emp = employees.find((e: Employee) => e.id === doubt.raisedById)
                   const isReplying = replyingDoubtId === doubt.id
 
                   return (
@@ -845,7 +939,7 @@ function AdminProjectDetailContent() {
               className="w-full h-10 rounded-lg border border-border bg-white px-3 text-sm text-text-primary"
             >
               <option value="admin">Admin (You)</option>
-              {mockEmployees.map((emp) => (
+              {employees.map((emp) => (
                 <option key={emp.id} value={emp.id}>
                   {emp.fullName} ({emp.designation})
                 </option>

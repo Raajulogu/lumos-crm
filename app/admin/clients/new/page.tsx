@@ -9,13 +9,13 @@ import Link from 'next/link'
 import { ContentWrapper } from '@/components/layout/ContentWrapper'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Card, Input, Textarea, Button } from '@/components/ui'
-import { mockClients } from '@/lib/mock-data'
-import { generateId } from '@/lib/utils'
+import { api } from '@/lib/api'
 import { Building2, User, Mail, Phone, MapPin, ArrowLeft, ArrowRight, Check } from 'lucide-react'
 
 export default function NewClientPage() {
   const router = useRouter()
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [serverError, setServerError] = useState('')
 
   // Form fields
   const [fullName, setFullName] = useState('')
@@ -53,37 +53,34 @@ export default function NewClientPage() {
     return Object.keys(newErrors).length === 0
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    setServerError('')
     if (!validate()) return
 
     setIsSubmitting(true)
 
-    const newClient = {
-      id: `cli-${generateId()}`,
-      fullName: fullName.trim(),
-      companyName: companyName.trim(),
-      email: email.trim(),
-      phone: phone.trim(),
-      address: address.trim() || undefined,
-      notes: notes.trim() || undefined,
-      status: 'active' as const,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }
+    try {
+      const created = await api.clients.create({
+        fullName: fullName.trim(),
+        companyName: companyName.trim(),
+        email: email.trim(),
+        phone: phone.trim(),
+        address: address.trim() || undefined,
+        notes: notes.trim() || undefined,
+      })
 
-    // Append to mock data
-    mockClients.unshift(newClient)
-
-    setTimeout(() => {
-      setIsSubmitting(false)
+      const clientId = created?.id || 'new'
       if (createProjectAfter) {
-        // Redirect to project creation pre-selecting this newly created client
-        router.push(`/admin/projects/new?clientId=${newClient.id}`)
+        router.push(`/admin/projects/new?clientId=${clientId}`)
       } else {
-        router.push(`/admin/clients/${newClient.id}`)
+        router.push(`/admin/clients/${clientId}`)
       }
-    }, 600)
+    } catch (err: any) {
+      setServerError(err?.message || 'Failed to create client on server.')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -104,6 +101,12 @@ export default function NewClientPage() {
           </Link>
         }
       />
+
+      {serverError && (
+        <div className="mb-4 p-3 rounded-lg bg-danger-light border border-danger/30 text-danger-dark text-sm font-medium">
+          {serverError}
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} noValidate>
         <Card padding="lg" className="space-y-6">

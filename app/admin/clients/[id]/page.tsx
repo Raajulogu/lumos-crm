@@ -3,19 +3,25 @@
 // app/admin/clients/[id]/page.tsx
 // Client Detail Page — full client 360 overview with project history, financial totals, follow-ups, and notes.
 
-import { useState, Suspense } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ContentWrapper } from '@/components/layout/ContentWrapper'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { Card, CardHeader, Badge, Button, Input, Textarea, Modal, PageLoader } from '@/components/ui'
 import {
-  mockClients,
-  mockProjects,
-  mockFollowUps,
-  mockNotes,
-  mockEmployees,
-} from '@/lib/mock-data'
+  Card,
+  CardHeader,
+  Badge,
+  Button,
+  Input,
+  Textarea,
+  Modal,
+  PageLoader,
+  CardSkeleton,
+  TableSkeleton,
+} from '@/components/ui'
+import { api } from '@/lib/api'
+import type { Client, Project, FollowUp, Note, Employee } from '@/lib/types'
 import {
   Building2,
   Mail,
@@ -29,6 +35,7 @@ import {
   ArrowLeft,
   ChevronRight,
   TrendingUp,
+  AlertCircle,
 } from 'lucide-react'
 import {
   formatDate,
@@ -54,14 +61,14 @@ function ClientDetailContent() {
   const router = useRouter()
   const clientId = params?.id as string
 
-  const client = mockClients.find((c) => c.id === clientId)
-  const clientProjects = mockProjects.filter((p) => p.clientId === clientId)
-  const clientFollowUps = mockFollowUps.filter((f) => f.clientId === clientId)
+  const [loading, setLoading] = useState(true)
+  const [client, setClient] = useState<Client | null>(null)
+  const [clientProjects, setClientProjects] = useState<Project[]>([])
+  const [clientFollowUps, setClientFollowUps] = useState<FollowUp[]>([])
+  const [employees, setEmployees] = useState<Employee[]>([])
 
   // Local state for interactive notes
-  const [notesList, setNotesList] = useState(
-    mockNotes.filter((n) => clientProjects.some((p) => p.id === n.projectId)),
-  )
+  const [notesList, setNotesList] = useState<Note[]>([])
   const [newNoteContent, setNewNoteContent] = useState('')
   const [isAddingNote, setIsAddingNote] = useState(false)
 
@@ -70,7 +77,73 @@ function ClientDetailContent() {
   const [followupDate, setFollowupDate] = useState('')
   const [followupNotes, setFollowupNotes] = useState('')
   const [followupAssignedTo, setFollowupAssignedTo] = useState('admin')
-  const [followupProjectId, setFollowupProjectId] = useState(clientProjects[0]?.id || '')
+  const [followupProjectId, setFollowupProjectId] = useState('')
+
+  useEffect(() => {
+    let mounted = true
+    setLoading(true)
+
+    Promise.allSettled([
+      api.clients.getById(clientId),
+      api.projects.list({ limit: 100 }),
+      api.followups.list({ limit: 100 }),
+      api.employees.list(),
+    ])
+      .then(([clientRes, projRes, fuRes, empRes]) => {
+        if (!mounted) return
+
+        if (clientRes.status === 'fulfilled' && clientRes.value) {
+          const detail = clientRes.value
+          setClient(detail.client || (detail as unknown as Client))
+          if (detail.projects) setClientProjects(detail.projects)
+          if (detail.followUps) setClientFollowUps(detail.followUps)
+        }
+
+        if (projRes.status === 'fulfilled') {
+          const matching = (projRes.value?.projects || []).filter(
+            (p) => p.clientId === clientId,
+          )
+          setClientProjects(matching)
+          if (matching.length > 0) {
+            setFollowupProjectId(matching[0].id)
+          }
+        }
+
+        if (fuRes.status === 'fulfilled') {
+          const matchingFu = (fuRes.value?.followups || []).filter(
+            (f) => f.clientId === clientId,
+          )
+          setClientFollowUps(matchingFu)
+        }
+
+        if (empRes.status === 'fulfilled') {
+          setEmployees(empRes.value || [])
+        }
+      })
+      .finally(() => {
+        if (mounted) setLoading(false)
+      })
+
+    return () => {
+      mounted = false
+    }
+  }, [clientId])
+
+  if (loading) {
+    return (
+      <ContentWrapper>
+        <div className="space-y-6">
+          <CardSkeleton rows={2} />
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <CardSkeleton key={i} rows={2} />
+            ))}
+          </div>
+          <TableSkeleton rows={4} cols={4} />
+        </div>
+      </ContentWrapper>
+    )
+  }
 
   if (!client) {
     return (
@@ -94,51 +167,62 @@ function ClientDetailContent() {
   // Calculations
   const deliveredProjects = clientProjects.filter((p) => p.status === 'delivered')
   const inProgressProjects = clientProjects.filter(
-    (p) => p.status === 'in_progress' || p.status === 'under_review' || p.status === 'new',
+    (p) =>
+      p.status === 'in_progress' ||
+      p.status === 'under_review' ||
+      p.status === 'new',
   )
   const totalBilled = clientProjects.reduce((sum, p) => sum + p.budget, 0)
-  const totalCost = clientProjects.reduce((sum, p) => sum + (p.actualCost || 0), 0)
+  const totalCost = clientProjects.reduce(
+    (sum, p) => sum + (p.actualCost || 0),
+    0,
+  )
   const estimatedProfit = totalBilled - totalCost
 
-  function handleAddNote(e: React.FormEvent) {
+  async function handleAddNote(e: React.FormEvent) {
     e.preventDefault()
     if (!newNoteContent.trim()) return
 
-    const newNote = {
+    const targetProjId = clientProjects[0]?.id
+    if (targetProjId) {
+      try {
+        const added = await api.notes.add(targetProjId, newNoteContent.trim())
+        if (added) setNotesList([added, ...notesList])
+      } catch {}
+    }
+
+    const fallbackNote: Note = {
       id: `note-${generateId()}`,
-      projectId: clientProjects[0]?.id || 'general',
+      projectId: targetProjId || 'general',
       authorId: 'admin',
-      authorType: 'admin' as const,
+      authorType: 'admin',
       authorName: 'Admin',
       content: newNoteContent.trim(),
       createdAt: new Date().toISOString(),
     }
 
-    setNotesList([newNote, ...notesList])
+    setNotesList((prev) => [fallbackNote, ...prev])
     setNewNoteContent('')
     setIsAddingNote(false)
   }
 
-  function handleCreateFollowup(e: React.FormEvent) {
+  async function handleCreateFollowup(e: React.FormEvent) {
     e.preventDefault()
     if (!followupDate || !client) return
 
-    const newFollowup = {
-      id: `fu-${generateId()}`,
-      projectId: followupProjectId || clientProjects[0]?.id || '',
-      clientId: client.id,
-      scheduledAt: new Date(followupDate).toISOString(),
-      assignedToId: followupAssignedTo,
-      assignedToName:
-        followupAssignedTo === 'admin'
-          ? 'Admin'
-          : mockEmployees.find((e) => e.id === followupAssignedTo)?.fullName || 'Staff',
-      notes: followupNotes.trim() || undefined,
-      status: 'pending' as const,
-      createdAt: new Date().toISOString(),
-    }
+    try {
+      const created = await api.followups.create({
+        projectId: followupProjectId || clientProjects[0]?.id || '',
+        clientId: client.id,
+        scheduledAt: new Date(followupDate).toISOString(),
+        assignedToId: followupAssignedTo,
+        notes: followupNotes.trim() || undefined,
+      })
+      if (created) {
+        setClientFollowUps([created, ...clientFollowUps])
+      }
+    } catch {}
 
-    mockFollowUps.unshift(newFollowup)
     setIsFollowupModalOpen(false)
     setFollowupDate('')
     setFollowupNotes('')
@@ -238,7 +322,7 @@ function ClientDetailContent() {
               <div className="divide-y divide-border">
                 {clientProjects.map((proj) => {
                   const isLate = isOverdue(proj.deliveryDate, proj.status)
-                  const primaryEmp = mockEmployees.find((e) => e.id === proj.primaryEmployeeId)
+                  const primaryEmp = employees.find((e: Employee) => e.id === proj.primaryEmployeeId)
 
                   return (
                     <div
@@ -546,7 +630,7 @@ function ClientDetailContent() {
               className="w-full h-10 rounded-lg border border-border bg-white px-3 text-sm text-text-primary"
             >
               <option value="admin">Admin (You)</option>
-              {mockEmployees.map((emp) => (
+              {employees.map((emp: Employee) => (
                 <option key={emp.id} value={emp.id}>
                   {emp.fullName} ({emp.designation})
                 </option>

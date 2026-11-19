@@ -1,15 +1,18 @@
 // components/ui/EmptyState.tsx
+import React from 'react'
 import { cn } from '@/lib/utils'
 import { Button } from './Button'
+
+interface EmptyStateActionObject {
+  label: string
+  onClick: () => void
+}
 
 interface EmptyStateProps {
   icon?: React.ReactNode
   title: string
   description?: string
-  action?: {
-    label: string
-    onClick: () => void
-  }
+  action?: EmptyStateActionObject | React.ReactNode
   className?: string
 }
 
@@ -35,15 +38,16 @@ export function EmptyState({
         <p className="text-sm text-text-muted max-w-xs">{description}</p>
       )}
       {action && (
-        <Button
-          onClick={action.onClick}
-          variant="primary"
-          className="mt-5"
-        >
-          {action.label}
-        </Button>
+        <div className="mt-5">
+          {React.isValidElement(action) ? (
+            action
+          ) : typeof action === 'object' && 'label' in (action as EmptyStateActionObject) ? (
+            <Button onClick={(action as EmptyStateActionObject).onClick} variant="primary">
+              {(action as EmptyStateActionObject).label}
+            </Button>
+          ) : null}
+        </div>
       )}
     </div>
   )
 }
-

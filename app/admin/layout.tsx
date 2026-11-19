@@ -4,12 +4,13 @@
 // Dashboard shell layout for the admin portal.
 // Renders: Sidebar (desktop) + Topbar + MobileNav
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { Topbar } from '@/components/layout/Topbar'
 import { MobileNav } from '@/components/layout/MobileNav'
 import { NotificationDrawer } from '@/components/common/NotificationDrawer'
-import { mockNotifications } from '@/lib/mock-data'
+import { api } from '@/lib/api'
+import type { AppNotification } from '@/lib/types'
 import { useSidebar } from '@/hooks/useSidebar'
 import { useAuth } from '@/lib/auth-context'
 
@@ -21,18 +22,31 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
   const { currentUser } = useAuth()
   const { isOpen, isCollapsed, open, close, toggleCollapse } = useSidebar()
   const [notifOpen, setNotifOpen] = useState(false)
-  const [notifications, setNotifications] = useState(
-    mockNotifications.filter((n) => n.recipientId === 'admin'),
-  )
+  const [notifications, setNotifications] = useState<AppNotification[]>([])
 
-  function handleMarkRead(id: string) {
+  useEffect(() => {
+    api.notifications
+      .list()
+      .then((data) => {
+        if (data) setNotifications(data)
+      })
+      .catch(() => {})
+  }, [])
+
+  async function handleMarkRead(id: string) {
     setNotifications((prev) =>
       prev.map((n) => (n.id === id ? { ...n, read: true } : n)),
     )
+    try {
+      await api.notifications.markRead(id)
+    } catch {}
   }
 
-  function handleMarkAllRead() {
+  async function handleMarkAllRead() {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
+    try {
+      await api.notifications.markAllRead()
+    } catch {}
   }
 
   return (

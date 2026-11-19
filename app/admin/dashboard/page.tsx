@@ -1,21 +1,32 @@
 'use client'
 
 // app/admin/dashboard/page.tsx
-// Admin Dashboard — Central command center with live mock metrics, quick actions, and activity feeds.
+// Admin Dashboard — Real API data integration with loading skeletons and 0-data screens.
 
-import { Suspense } from 'react'
+import { useState, useEffect, useMemo, Suspense } from 'react'
 import Link from 'next/link'
 import { ContentWrapper } from '@/components/layout/ContentWrapper'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { Card, CardHeader, Badge, Button, PageLoader } from '@/components/ui'
 import {
-  mockProjects,
-  mockClients,
-  mockEmployees,
-  mockDoubts,
-  mockFollowUps,
-  mockNotifications,
-} from '@/lib/mock-data'
+  Card,
+  CardHeader,
+  Badge,
+  Button,
+  PageLoader,
+  MetricCardSkeleton,
+  TableSkeleton,
+  CardSkeleton,
+  EmptyState,
+} from '@/components/ui'
+import { api } from '@/lib/api'
+import type {
+  Project,
+  Client,
+  Employee,
+  FollowUp,
+  Doubt,
+  AppNotification,
+} from '@/lib/types'
 import {
   AlertTriangle,
   Calendar,
@@ -27,6 +38,7 @@ import {
   Clock,
   CheckCircle2,
   AlertCircle,
+  FolderOpen,
 } from 'lucide-react'
 import {
   formatDate,
@@ -49,22 +61,87 @@ export default function AdminDashboardPage() {
 }
 
 function AdminDashboardContent() {
-  // Dynamic metrics calculations
-  const activeProjects = mockProjects.filter((p) => p.status !== 'delivered')
-  const overdueProjects = activeProjects.filter((p) =>
-    isOverdue(p.deliveryDate, p.status),
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const [projects, setProjects] = useState<Project[]>([])
+  const [clients, setClients] = useState<Client[]>([])
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [followups, setFollowups] = useState<FollowUp[]>([])
+  const [doubts, setDoubts] = useState<Doubt[]>([])
+  const [notifications, setNotifications] = useState<AppNotification[]>([])
+
+  useEffect(() => {
+    let mounted = true
+    setLoading(true)
+    setError(null)
+
+    Promise.allSettled([
+      api.projects.list({ limit: 100 }),
+      api.clients.list({ limit: 100 }),
+      api.employees.list(),
+      api.followups.list({ limit: 50 }),
+      api.notifications.list(),
+    ])
+      .then(([projRes, clientRes, empRes, fuRes, notifRes]) => {
+        if (!mounted) return
+
+        if (projRes.status === 'fulfilled') {
+          const list = projRes.value?.projects || []
+          setProjects(list)
+          // Fetch open doubts across projects if needed
+        }
+        if (clientRes.status === 'fulfilled') {
+          setClients(clientRes.value?.clients || [])
+        }
+        if (empRes.status === 'fulfilled') {
+          setEmployees(empRes.value || [])
+        }
+        if (fuRes.status === 'fulfilled') {
+          setFollowups(fuRes.value?.followups || [])
+        }
+        if (notifRes.status === 'fulfilled') {
+          setNotifications(notifRes.value || [])
+        }
+      })
+      .catch((err) => {
+        if (mounted) setError(err?.message || 'Failed to connect to backend server')
+      })
+      .finally(() => {
+        if (mounted) setLoading(false)
+      })
+
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  // Dynamic calculations from real API data
+  const activeProjects = useMemo(
+    () => projects.filter((p) => p.status !== 'delivered'),
+    [projects],
   )
-  const upcomingProjects = activeProjects.filter((p) => {
-    const days = getDaysUntil(p.deliveryDate)
-    return days >= 0 && days <= 7
-  })
+  const overdueProjects = useMemo(
+    () => activeProjects.filter((p) => isOverdue(p.deliveryDate, p.status)),
+    [activeProjects],
+  )
+  const upcomingProjects = useMemo(
+    () =>
+      activeProjects.filter((p) => {
+        const days = getDaysUntil(p.deliveryDate)
+        return days >= 0 && days <= 7
+      }),
+    [activeProjects],
+  )
+  const openDoubts = useMemo(() => doubts.filter((d) => d.status === 'open'), [doubts])
+  const pendingFollowups = useMemo(
+    () => followups.filter((f) => f.status === 'pending'),
+    [followups],
+  )
 
-  const openDoubts = mockDoubts.filter((d) => d.status === 'open')
-  const pendingFollowups = mockFollowUps.filter((f) => f.status === 'pending')
-
-  // Lookup maps for fast joining
-  const clientMap = new Map(mockClients.map((c) => [c.id, c]))
-  const employeeMap = new Map(mockEmployees.map((e) => [e.id, e]))
+  // Fast map joins
+  const clientMap = useMemo(() => new Map(clients.map((c) => [c.id, c])), [clients])
+  const employeeMap = useMemo(() => new Map(employees.map((e) => [e.id, e])), [employees])
 
   const statCards = [
     {
@@ -109,8 +186,10 @@ function AdminDashboardContent() {
     },
   ]
 
-  // Priority Attention list: overdue + upcoming projects
-  const urgentAttentionProjects = [...overdueProjects, ...upcomingProjects].slice(0, 5)
+  const urgentAttentionProjects = useMemo(
+    () => [...overdueProjects, ...upcomingProjects].slice(0, 5),
+    [overdueProjects, upcomingProjects],
+  )
 
   return (
     <ContentWrapper>
@@ -135,22 +214,42 @@ function AdminDashboardContent() {
         }
       />
 
-      {/* 5 KPI Stat Cards — Mobile: 2 cols, Tablet: 3 cols, Desktop: 5 cols */}
+      {error && (
+        <div className="mb-6 p-4 rounded-xl bg-danger-light border border-danger/30 text-danger-dark flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-5 w-5 flex-shrink-0" />
+            <span className="text-sm font-medium">{error}</span>
+          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => window.location.reload()}
+          >
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {/* 5 KPI Stat Cards — Skeletons during loading */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
-        {statCards.map((card) => {
-          const Icon = card.icon
-          return (
-            <Link key={card.label} href={card.link}>
-              <Card padding="md" hover className="h-full">
-                <div className={`inline-flex p-2 rounded-lg ${card.bg} mb-3`}>
-                  <Icon className={`h-5 w-5 ${card.color}`} />
-                </div>
-                <p className="text-2xl font-bold text-text-primary">{card.value}</p>
-                <p className="text-xs text-text-muted mt-0.5 leading-snug">{card.label}</p>
-              </Card>
-            </Link>
-          )
-        })}
+        {loading
+          ? Array.from({ length: 5 }).map((_, i) => <MetricCardSkeleton key={i} />)
+          : statCards.map((card) => {
+              const Icon = card.icon
+              return (
+                <Link key={card.label} href={card.link}>
+                  <Card padding="md" hover className="h-full">
+                    <div className={`inline-flex p-2 rounded-lg ${card.bg} mb-3`}>
+                      <Icon className={`h-5 w-5 ${card.color}`} />
+                    </div>
+                    <p className="text-2xl font-bold text-text-primary">{card.value}</p>
+                    <p className="text-xs text-text-muted mt-0.5 leading-snug">
+                      {card.label}
+                    </p>
+                  </Card>
+                </Link>
+              )
+            })}
       </div>
 
       {/* Main Grid: Projects Needing Attention + Sidebar Feeds */}
@@ -172,10 +271,15 @@ function AdminDashboardContent() {
               }
             />
 
-            {urgentAttentionProjects.length === 0 ? (
-              <div className="py-8 text-center text-sm text-text-muted">
-                <CheckCircle2 className="h-8 w-8 text-success mx-auto mb-2 opacity-80" />
-                All projects are on track! No overdue or urgent deadlines.
+            {loading ? (
+              <TableSkeleton rows={3} cols={3} />
+            ) : urgentAttentionProjects.length === 0 ? (
+              <div className="py-10 text-center text-sm text-text-muted">
+                <CheckCircle2 className="h-10 w-10 text-success mx-auto mb-2 opacity-80" />
+                <p className="font-semibold text-text-primary">All Clear</p>
+                <p className="text-xs text-text-muted mt-1">
+                  All projects are on track! No overdue or urgent deadlines.
+                </p>
               </div>
             ) : (
               <div className="divide-y divide-border">
@@ -218,15 +322,24 @@ function AdminDashboardContent() {
 
                         <div className="flex items-center gap-3 text-xs text-text-secondary mt-1 flex-wrap">
                           <span>
-                            Client: <strong className="text-text-primary">{client?.companyName}</strong>
+                            Client:{' '}
+                            <strong className="text-text-primary">
+                              {client?.companyName || 'Unknown Client'}
+                            </strong>
                           </span>
                           <span>•</span>
                           <span>
-                            Assigned: <strong className="text-text-primary">{primaryEmp?.fullName || 'Unassigned'}</strong>
+                            Assigned:{' '}
+                            <strong className="text-text-primary">
+                              {primaryEmp?.fullName || 'Unassigned'}
+                            </strong>
                           </span>
                           <span>•</span>
                           <span>
-                            Budget: <strong className="text-text-primary">{formatCurrency(proj.budget)}</strong>
+                            Budget:{' '}
+                            <strong className="text-text-primary">
+                              {formatCurrency(proj.budget)}
+                            </strong>
                           </span>
                         </div>
                       </div>
@@ -241,7 +354,11 @@ function AdminDashboardContent() {
                             }`}
                           >
                             {formatDate(proj.deliveryDate)}
-                            {isLate ? ' (Overdue)' : daysLeft <= 3 ? ` (${daysLeft}d left)` : ''}
+                            {isLate
+                              ? ' (Overdue)'
+                              : daysLeft <= 3
+                              ? ` (${daysLeft}d left)`
+                              : ''}
                           </p>
                         </div>
 
@@ -265,15 +382,19 @@ function AdminDashboardContent() {
               description="Internal inquiries blocking team progress"
             />
 
-            {openDoubts.length === 0 ? (
-              <p className="text-xs text-text-muted py-4 text-center">
-                No open doubts. Your team has no blockers right now.
-              </p>
+            {loading ? (
+              <CardSkeleton rows={2} />
+            ) : openDoubts.length === 0 ? (
+              <div className="py-8 text-center text-xs text-text-muted">
+                <MessageCircle className="h-8 w-8 text-slate-300 mx-auto mb-2" />
+                <p className="font-medium text-text-primary">No Open Doubts</p>
+                <p className="mt-0.5">Your team has no blockers or unresolved questions right now.</p>
+              </div>
             ) : (
               <div className="space-y-3">
                 {openDoubts.map((doubt) => {
                   const emp = employeeMap.get(doubt.raisedById)
-                  const proj = mockProjects.find((p) => p.id === doubt.projectId)
+                  const proj = projects.find((p) => p.id === doubt.projectId)
 
                   return (
                     <div
@@ -286,8 +407,11 @@ function AdminDashboardContent() {
                             {doubt.subject}
                           </p>
                           <p className="text-text-muted text-[11px] mt-0.5">
-                            Raised by <strong className="text-text-secondary">{emp?.fullName || 'Employee'}</strong> on{' '}
-                            <span className="font-medium">{proj?.name}</span> •{' '}
+                            Raised by{' '}
+                            <strong className="text-text-secondary">
+                              {emp?.fullName || 'Employee'}
+                            </strong>{' '}
+                            on <span className="font-medium">{proj?.name || 'Project'}</span> •{' '}
                             {formatRelativeTime(doubt.createdAt)}
                           </p>
                         </div>
@@ -319,7 +443,7 @@ function AdminDashboardContent() {
           </Card>
         </div>
 
-        {/* Right Column: Follow-ups & Recent Notifications/Activity */}
+        {/* Right Column: Follow-ups & Recent Notifications */}
         <div className="space-y-6">
           {/* Scheduled Client Follow-ups */}
           <Card padding="md">
@@ -336,13 +460,17 @@ function AdminDashboardContent() {
               }
             />
 
-            <div className="space-y-3">
-              {pendingFollowups.length === 0 ? (
-                <p className="text-xs text-text-muted py-4 text-center">
-                  No pending follow-ups scheduled.
-                </p>
-              ) : (
-                pendingFollowups.map((fu) => {
+            {loading ? (
+              <CardSkeleton rows={3} />
+            ) : pendingFollowups.length === 0 ? (
+              <div className="py-8 text-center text-xs text-text-muted">
+                <Phone className="h-7 w-7 text-slate-300 mx-auto mb-2" />
+                <p className="font-medium text-text-primary">0 Pending Follow-ups</p>
+                <p className="mt-0.5">No upcoming calls or meetings scheduled.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {pendingFollowups.slice(0, 5).map((fu) => {
                   const client = clientMap.get(fu.clientId)
                   const assigned =
                     fu.assignedToId === 'admin'
@@ -356,7 +484,7 @@ function AdminDashboardContent() {
                     >
                       <div className="flex items-center justify-between">
                         <span className="font-semibold text-text-primary truncate">
-                          {client?.companyName}
+                          {client?.companyName || 'Client'}
                         </span>
                         <span className="text-[11px] text-text-muted flex items-center gap-1">
                           <Clock className="h-3 w-3" />
@@ -365,20 +493,23 @@ function AdminDashboardContent() {
                       </div>
 
                       {fu.notes && (
-                        <p className="text-text-secondary line-clamp-2">
-                          {fu.notes}
-                        </p>
+                        <p className="text-text-secondary line-clamp-2">{fu.notes}</p>
                       )}
 
                       <div className="flex items-center justify-between pt-1 border-t border-border/60 text-[11px] text-text-muted">
-                        <span>Owner: <strong className="text-text-secondary">{assigned}</strong></span>
-                        <Badge variant="green" size="sm">Pending</Badge>
+                        <span>
+                          Owner:{' '}
+                          <strong className="text-text-secondary">{assigned}</strong>
+                        </span>
+                        <Badge variant="green" size="sm">
+                          Pending
+                        </Badge>
                       </div>
                     </div>
                   )
-                })
-              )}
-            </div>
+                })}
+              </div>
+            )}
           </Card>
 
           {/* Recent System Activity */}
@@ -388,29 +519,39 @@ function AdminDashboardContent() {
               description="Notifications and system audit trail"
             />
 
-            <div className="space-y-3">
-              {mockNotifications.slice(0, 4).map((n) => (
-                <div
-                  key={n.id}
-                  className="flex items-start gap-2.5 text-xs pb-3 border-b border-border last:border-b-0 last:pb-0"
-                >
-                  <div className="p-1.5 rounded-full bg-brand-50 text-brand-600 mt-0.5 flex-shrink-0">
-                    <AlertCircle className="h-3.5 w-3.5" />
+            {loading ? (
+              <CardSkeleton rows={3} />
+            ) : notifications.length === 0 ? (
+              <div className="py-8 text-center text-xs text-text-muted">
+                <AlertCircle className="h-7 w-7 text-slate-300 mx-auto mb-2" />
+                <p className="font-medium text-text-primary">No Recent Activity</p>
+                <p className="mt-0.5">Activity and alerts will appear here in real-time.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {notifications.slice(0, 4).map((n) => (
+                  <div
+                    key={n.id}
+                    className="flex items-start gap-2.5 text-xs pb-3 border-b border-border last:border-b-0 last:pb-0"
+                  >
+                    <div className="p-1.5 rounded-full bg-brand-50 text-brand-600 mt-0.5 flex-shrink-0">
+                      <AlertCircle className="h-3.5 w-3.5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold text-text-primary leading-tight">
+                        {n.title}
+                      </p>
+                      <p className="text-text-muted text-[11px] mt-0.5 leading-snug">
+                        {n.message}
+                      </p>
+                      <p className="text-[10px] text-text-muted mt-1">
+                        {formatRelativeTime(n.createdAt)}
+                      </p>
+                    </div>
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-semibold text-text-primary leading-tight">
-                      {n.title}
-                    </p>
-                    <p className="text-text-muted text-[11px] mt-0.5 leading-snug">
-                      {n.message}
-                    </p>
-                    <p className="text-[10px] text-text-muted mt-1">
-                      {formatRelativeTime(n.createdAt)}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </Card>
         </div>
       </div>

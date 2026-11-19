@@ -3,14 +3,13 @@
 // app/admin/employees/new/page.tsx
 // Add Employee Form — Onboard full-time, interns, or hourly consultants with initial credentials.
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ContentWrapper } from '@/components/layout/ContentWrapper'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Card, Input, Textarea, Button } from '@/components/ui'
-import { mockEmployees } from '@/lib/mock-data'
-import { generateId } from '@/lib/utils'
+import { api } from '@/lib/api'
 import {
   User,
   Mail,
@@ -22,12 +21,14 @@ import {
   ArrowLeft,
   Check,
   ShieldCheck,
+  AlertCircle,
 } from 'lucide-react'
 import type { PayType } from '@/lib/types'
 
 export default function NewEmployeePage() {
   const router = useRouter()
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [serverError, setServerError] = useState('')
 
   // Fields
   const [fullName, setFullName] = useState('')
@@ -36,9 +37,13 @@ export default function NewEmployeePage() {
   const [designation, setDesignation] = useState('')
   const [payType, setPayType] = useState<PayType>('salary')
   const [payRate, setPayRate] = useState('')
-  const [joinDate, setJoinDate] = useState('2026-11-05')
+  const [joinDate, setJoinDate] = useState('')
   const [initialPassword, setInitialPassword] = useState('')
   const [notes, setNotes] = useState('')
+
+  useEffect(() => {
+    setJoinDate(new Date().toISOString().split('T')[0])
+  }, [])
 
   // Validation
   const [errors, setErrors] = useState<{
@@ -67,33 +72,33 @@ export default function NewEmployeePage() {
     return Object.keys(errs).length === 0
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    setServerError('')
     if (!validate()) return
 
     setIsSubmitting(true)
 
-    const newEmp = {
-      id: `emp-${generateId()}`,
-      fullName: fullName.trim(),
-      email: email.trim(),
-      phone: phone.trim(),
-      designation: designation.trim(),
-      payType,
-      payRate: Number(payRate),
-      joinDate,
-      status: 'active' as const,
-      mustChangePassword: true,
-      notes: notes.trim() || undefined,
-      createdAt: new Date().toISOString(),
-    }
+    try {
+      const created = await api.employees.create({
+        fullName: fullName.trim(),
+        email: email.trim(),
+        phone: phone.trim(),
+        designation: designation.trim(),
+        payType,
+        payRate: Number(payRate),
+        joinDate: new Date(joinDate).toISOString(),
+        initialPassword,
+        notes: notes.trim() || undefined,
+      })
 
-    mockEmployees.push(newEmp)
-
-    setTimeout(() => {
+      const empId = created?.id || 'new'
+      router.push(`/admin/employees/${empId}`)
+    } catch (err: any) {
+      setServerError(err?.message || 'Failed to onboard employee on backend server.')
+    } finally {
       setIsSubmitting(false)
-      router.push(`/admin/employees/${newEmp.id}`)
-    }, 600)
+    }
   }
 
   return (
@@ -114,6 +119,12 @@ export default function NewEmployeePage() {
           </Link>
         }
       />
+
+      {serverError && (
+        <div className="mb-4 p-3 rounded-lg bg-danger-light border border-danger/30 text-danger-dark text-sm font-medium">
+          {serverError}
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} noValidate>
         <Card padding="lg" className="space-y-6">
