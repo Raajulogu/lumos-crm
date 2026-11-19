@@ -157,6 +157,49 @@ async function apiRequest<T>(
   }
 }
 
+// ─── Normalization & Unwrapping Helpers ───────────────────────
+
+function normalizeEntity<T>(entity: T): T {
+  if (!entity || typeof entity !== 'object') return entity
+  const e = { ...entity } as any
+  if (!e.id && e._id) {
+    e.id = String(e._id)
+  }
+  return e as T
+}
+
+function extractList<T>(data: any, preferredField?: string): T[] {
+  if (!data) return []
+  if (Array.isArray(data)) return data.map(normalizeEntity)
+  if (typeof data === 'object') {
+    if (preferredField && Array.isArray(data[preferredField])) {
+      return data[preferredField].map(normalizeEntity)
+    }
+    if (Array.isArray(data.items)) return data.items.map(normalizeEntity)
+    if (Array.isArray(data.data)) return data.data.map(normalizeEntity)
+    if (Array.isArray(data.results)) return data.results.map(normalizeEntity)
+    if (Array.isArray(data.projects)) return data.projects.map(normalizeEntity)
+    if (Array.isArray(data.clients)) return data.clients.map(normalizeEntity)
+    if (Array.isArray(data.employees)) return data.employees.map(normalizeEntity)
+    if (Array.isArray(data.doubts)) return data.doubts.map(normalizeEntity)
+    if (Array.isArray(data.notes)) return data.notes.map(normalizeEntity)
+    if (Array.isArray(data.followups)) return data.followups.map(normalizeEntity)
+    if (Array.isArray(data.categories)) return data.categories.map(normalizeEntity)
+  }
+  return []
+}
+
+function extractEntity<T>(data: any, preferredField?: string): T {
+  if (!data || typeof data !== 'object') return data
+  let target = data
+  if (preferredField && data[preferredField] && typeof data[preferredField] === 'object') {
+    target = data[preferredField]
+  } else if ('data' in data && data.data && typeof data.data === 'object' && !Array.isArray(data.data)) {
+    target = data.data
+  }
+  return normalizeEntity(target) as T
+}
+
 // ─── API Services Catalog ─────────────────────────────────────
 
 export const api = {
@@ -280,8 +323,9 @@ export const api = {
       if (params?.page) q.set('page', params.page.toString())
       if (params?.limit) q.set('limit', params.limit.toString())
 
-      const res = await apiRequest<Client[]>(`/clients?${q.toString()}`)
-      return { clients: res.data || [], meta: res.meta }
+      const res = await apiRequest<any>(`/clients?${q.toString()}`)
+      const clients = extractList<Client>(res.data, 'clients')
+      return { clients, meta: res.meta }
     },
 
     async getById(id: string) {
@@ -298,7 +342,17 @@ export const api = {
         projects?: Project[]
         followUps?: FollowUp[]
       }>(`/clients/${id}`)
-      return res.data
+      const raw = res.data as any
+      if (raw && typeof raw === 'object') {
+        const clientObj = raw.client || raw
+        return {
+          ...raw,
+          client: normalizeEntity(clientObj),
+          projects: extractList<Project>(raw.projects, 'projects'),
+          followUps: extractList<FollowUp>(raw.followUps, 'followups'),
+        }
+      }
+      return raw
     },
 
     async create(payload: CreateClientPayload) {
@@ -306,7 +360,7 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(payload),
       })
-      return res.data
+      return extractEntity<Client>(res.data, 'client')
     },
 
     async update(id: string, payload: Partial<CreateClientPayload>) {
@@ -314,7 +368,7 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify(payload),
       })
-      return res.data
+      return extractEntity<Client>(res.data, 'client')
     },
 
     async toggleStatus(id: string, status: 'active' | 'inactive') {
@@ -322,7 +376,7 @@ export const api = {
         method: 'PATCH',
         body: JSON.stringify({ status }),
       })
-      return res.data
+      return extractEntity<Client>(res.data, 'client')
     },
   },
 
@@ -348,18 +402,19 @@ export const api = {
       if (params?.page) q.set('page', params.page.toString())
       if (params?.limit) q.set('limit', params.limit.toString())
 
-      const res = await apiRequest<Project[]>(`/projects?${q.toString()}`)
-      return { projects: res.data || [], meta: res.meta }
+      const res = await apiRequest<any>(`/projects?${q.toString()}`)
+      const projects = extractList<Project>(res.data, 'projects')
+      return { projects, meta: res.meta }
     },
 
     async getById(id: string) {
-      const res = await apiRequest<Project & {
+      const res = await apiRequest<any>(`/projects/${id}`)
+      return extractEntity<Project & {
         client?: { id: string; fullName: string; companyName: string; email?: string; phone?: string; address?: string }
         primaryEmployee?: Employee
         profit?: number
         profitMargin?: number
-      }>(`/projects/${id}`)
-      return res.data
+      }>(res.data, 'project')
     },
 
     async create(payload: CreateProjectPayload) {
@@ -367,7 +422,7 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(payload),
       })
-      return res.data
+      return extractEntity<Project>(res.data, 'project')
     },
 
     async update(id: string, payload: Partial<CreateProjectPayload>) {
@@ -375,7 +430,7 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify(payload),
       })
-      return res.data
+      return extractEntity<Project>(res.data, 'project')
     },
 
     async updateStatus(id: string, status: ProjectStatus) {
@@ -383,7 +438,7 @@ export const api = {
         method: 'PATCH',
         body: JSON.stringify({ status }),
       })
-      return res.data
+      return extractEntity<Project>(res.data, 'project')
     },
 
     async updateFinancials(id: string, payload: { budget: number; actualCost?: number }) {
@@ -391,7 +446,7 @@ export const api = {
         method: 'PATCH',
         body: JSON.stringify(payload),
       })
-      return res.data
+      return extractEntity<Project>(res.data, 'project')
     },
 
     async updateReminders(id: string, reminderOverrides: ReminderConfig[]) {
@@ -399,7 +454,7 @@ export const api = {
         method: 'PATCH',
         body: JSON.stringify({ reminderOverrides }),
       })
-      return res.data
+      return extractEntity<Project>(res.data, 'project')
     },
   },
 
@@ -407,8 +462,8 @@ export const api = {
   doubts: {
     async listByProject(projectId: string, status?: string) {
       const q = status && status !== 'all' ? `?status=${status}` : ''
-      const res = await apiRequest<Doubt[]>(`/projects/${projectId}/doubts${q}`)
-      return res.data || []
+      const res = await apiRequest<any>(`/projects/${projectId}/doubts${q}`)
+      return extractList<Doubt>(res.data, 'doubts')
     },
 
     async raise(
@@ -419,7 +474,7 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(payload),
       })
-      return res.data
+      return extractEntity<Doubt>(res.data, 'doubt')
     },
 
     async reply(id: string, reply: string) {
@@ -427,22 +482,22 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ reply }),
       })
-      return res.data
+      return extractEntity<Doubt>(res.data, 'doubt')
     },
 
     async resolve(id: string) {
       const res = await apiRequest<Doubt>(`/doubts/${id}/resolve`, {
         method: 'PATCH',
       })
-      return res.data
+      return extractEntity<Doubt>(res.data, 'doubt')
     },
   },
 
   // ── Notes ──
   notes: {
     async listByProject(projectId: string) {
-      const res = await apiRequest<Note[]>(`/projects/${projectId}/notes`)
-      return res.data || []
+      const res = await apiRequest<any>(`/projects/${projectId}/notes`)
+      return extractList<Note>(res.data, 'notes')
     },
 
     async add(projectId: string, content: string) {
@@ -450,7 +505,7 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ content }),
       })
-      return res.data
+      return extractEntity<Note>(res.data, 'note')
     },
   },
 
@@ -472,8 +527,9 @@ export const api = {
       if (params?.page) q.set('page', params.page.toString())
       if (params?.limit) q.set('limit', params.limit.toString())
 
-      const res = await apiRequest<FollowUp[]>(`/followups?${q.toString()}`)
-      return { followups: res.data || [], meta: res.meta }
+      const res = await apiRequest<any>(`/followups?${q.toString()}`)
+      const followups = extractList<FollowUp>(res.data, 'followups')
+      return { followups, meta: res.meta }
     },
 
     async create(payload: {
@@ -487,7 +543,7 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(payload),
       })
-      return res.data
+      return extractEntity<FollowUp>(res.data, 'followup')
     },
 
     async updateStatus(id: string, status: FollowUpStatus) {
@@ -495,7 +551,7 @@ export const api = {
         method: 'PATCH',
         body: JSON.stringify({ status }),
       })
-      return res.data
+      return extractEntity<FollowUp>(res.data, 'followup')
     },
 
     async delete(id: string) {
@@ -510,15 +566,15 @@ export const api = {
   notifications: {
     async list(params?: { unreadOnly?: boolean }) {
       const q = params?.unreadOnly ? '?unreadOnly=true' : ''
-      const res = await apiRequest<AppNotification[]>(`/notifications${q}`)
-      return res.data || []
+      const res = await apiRequest<any>(`/notifications${q}`)
+      return extractList<AppNotification>(res.data, 'notifications')
     },
 
     async markRead(id: string) {
       const res = await apiRequest<AppNotification>(`/notifications/${id}/read`, {
         method: 'PATCH',
       })
-      return res.data
+      return extractEntity<AppNotification>(res.data, 'notification')
     },
 
     async markAllRead() {
@@ -537,8 +593,8 @@ export const api = {
       if (params?.status && params.status !== 'all') q.set('status', params.status)
       if (params?.payType && params.payType !== 'all') q.set('payType', params.payType)
 
-      const res = await apiRequest<Employee[]>(`/employees?${q.toString()}`)
-      return res.data || []
+      const res = await apiRequest<any>(`/employees?${q.toString()}`)
+      return extractList<Employee>(res.data, 'employees')
     },
 
     async getById(id: string) {
@@ -637,8 +693,8 @@ export const api = {
   // ── Settings & Customization ──
   settings: {
     async getCategories() {
-      const res = await apiRequest<ServiceCategory[]>('/settings/categories')
-      return res.data || []
+      const res = await apiRequest<any>('/settings/categories')
+      return extractList<ServiceCategory>(res.data, 'categories')
     },
 
     async createCategory(payload: { name: string; color?: string }) {

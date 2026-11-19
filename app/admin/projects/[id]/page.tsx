@@ -157,11 +157,18 @@ function AdminProjectDetailContent() {
   }, [projectId])
 
   // Lookup data
-  const client = project ? clients.find((c) => c.id === project.clientId) : null
-  const primaryEmp = project?.primaryEmployeeId
-    ? employees.find((e) => e.id === project.primaryEmployeeId)
-    : null
-  const categoryMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
+  const client =
+    (project as any)?.client ||
+    (project ? clients.find((c) => (c.id || (c as any)._id) === project.clientId) : null)
+  const primaryEmp =
+    (project as any)?.primaryEmployee ||
+    (project?.primaryEmployeeId
+      ? employees.find((e) => (e.id || (e as any)._id) === project.primaryEmployeeId)
+      : null)
+  const categoryMap = useMemo(
+    () => new Map(categories.map((c) => [c.id || (c as any)._id, c])),
+    [categories],
+  )
 
   if (loading) {
     return (
@@ -332,16 +339,19 @@ function AdminProjectDetailContent() {
   // Calculations
   const isLate = isOverdue(project.deliveryDate, project.status)
   const daysLeft = getDaysUntil(project.deliveryDate)
-  const currentCost = project.actualCost || 0
-  const netProfit = project.budget - currentCost
-  const profitMargin = project.budget > 0 ? Math.round((netProfit / project.budget) * 100) : 0
-  const openDoubtsCount = projectDoubts.filter((d) => d.status === 'open').length
+  const budget = Number(project.budget) || 0
+  const currentCost = Number(project.actualCost) || 0
+  const netProfit = budget - currentCost
+  const profitMargin = budget > 0 ? Math.round((netProfit / budget) * 100) : 0
+  const openDoubtsCount = Array.isArray(projectDoubts)
+    ? projectDoubts.filter((d) => d && d.status === 'open').length
+    : 0
 
   const tabs = [
     { id: 'overview', label: 'Overview & Scope' },
     { id: 'doubts', label: 'Doubts & Q&A', count: openDoubtsCount },
-    { id: 'followups', label: 'Follow-ups', count: projectFollowUps.length },
-    { id: 'notes', label: 'Internal Notes', count: projectNotes.length },
+    { id: 'followups', label: 'Follow-ups', count: Array.isArray(projectFollowUps) ? projectFollowUps.length : 0 },
+    { id: 'notes', label: 'Internal Notes', count: Array.isArray(projectNotes) ? projectNotes.length : 0 },
   ]
 
   return (
@@ -487,14 +497,15 @@ function AdminProjectDetailContent() {
                   Service Deliverable Categories
                 </h4>
                 <div className="flex flex-wrap gap-2">
-                  {project.serviceCategories.map((catId) => {
-                    const cat = categoryMap.get(catId)
+                  {Array.isArray(project.serviceCategories) && project.serviceCategories.map((catItem: any) => {
+                    const catId = typeof catItem === 'object' && catItem !== null ? catItem.id || catItem._id : catItem
+                    const cat = typeof catItem === 'object' && catItem !== null ? catItem : categoryMap.get(catId)
                     return (
                       <span
                         key={catId}
                         className="px-3 py-1 rounded-lg bg-brand-50 border border-brand-200 text-xs font-medium text-brand-700"
                       >
-                        {cat?.name || catId}
+                        {cat?.name || (typeof catItem === 'string' ? catItem : 'Service')}
                       </span>
                     )
                   })}
@@ -540,36 +551,38 @@ function AdminProjectDetailContent() {
                 title="Client Information"
                 description="Account associated with this project"
                 action={
-                  <Link href={`/admin/clients/${client?.id}`}>
-                    <Button variant="ghost" size="sm">
-                      View Profile
-                    </Button>
-                  </Link>
+                  client?.id ? (
+                    <Link href={`/admin/clients/${client.id}`}>
+                      <Button variant="ghost" size="sm">
+                        View Profile
+                      </Button>
+                    </Link>
+                  ) : null
                 }
               />
               <div className="space-y-3 text-xs">
                 <div>
                   <p className="text-text-muted">Company</p>
                   <p className="font-semibold text-sm text-text-primary mt-0.5">
-                    {client?.companyName}
+                    {client?.companyName || (project as any).clientName || 'N/A'}
                   </p>
                 </div>
                 <div>
                   <p className="text-text-muted">Contact Person</p>
                   <p className="font-medium text-text-primary mt-0.5">
-                    {client?.fullName}
+                    {client?.fullName || (project as any).clientContact || 'N/A'}
                   </p>
                 </div>
                 <div>
                   <p className="text-text-muted">Phone Number</p>
                   <p className="font-medium text-text-primary mt-0.5">
-                    {client?.phone}
+                    {client?.phone || 'N/A'}
                   </p>
                 </div>
                 <div>
                   <p className="text-text-muted">Email</p>
                   <p className="font-medium text-brand-600 mt-0.5">
-                    {client?.email}
+                    {client?.email || 'N/A'}
                   </p>
                 </div>
               </div>
@@ -588,19 +601,20 @@ function AdminProjectDetailContent() {
                   </p>
                 </div>
 
-                {project.additionalMemberIds && project.additionalMemberIds.length > 0 && (
+                {Array.isArray(project.additionalMemberIds) && project.additionalMemberIds.length > 0 && (
                   <div>
                     <p className="text-text-muted mb-1.5">Collaborators</p>
                     <div className="space-y-1">
-                      {project.additionalMemberIds.map((mId) => {
-                        const m = employees.find((e: Employee) => e.id === mId)
+                      {project.additionalMemberIds.map((mItem: any) => {
+                        const mId = typeof mItem === 'object' && mItem !== null ? mItem.id || mItem._id : mItem
+                        const m = typeof mItem === 'object' && mItem !== null ? mItem : employees.find((e: Employee) => (e.id || (e as any)._id) === mId)
                         return (
                           <div
                             key={mId}
                             className="p-1.5 rounded bg-surface border border-border text-xs flex items-center justify-between"
                           >
-                            <span>{m?.fullName}</span>
-                            <span className="text-text-muted text-[11px]">{m?.designation}</span>
+                            <span>{m?.fullName || (typeof mItem === 'string' ? mItem : 'Team Member')}</span>
+                            <span className="text-text-muted text-[11px]">{m?.designation || 'Staff'}</span>
                           </div>
                         )
                       })}
@@ -622,14 +636,14 @@ function AdminProjectDetailContent() {
               description="Questions submitted by employees working on this project"
             />
 
-            {projectDoubts.length === 0 ? (
+            {!Array.isArray(projectDoubts) || projectDoubts.length === 0 ? (
               <div className="py-12 text-center text-sm text-text-muted">
                 <CheckCircle2 className="h-8 w-8 text-success mx-auto mb-2 opacity-80" />
                 No doubts raised for this project. Everything is running smoothly!
               </div>
             ) : (
               <div className="space-y-4">
-                {projectDoubts.map((doubt) => {
+                {(Array.isArray(projectDoubts) ? projectDoubts : []).map((doubt) => {
                   const emp = employees.find((e: Employee) => e.id === doubt.raisedById)
                   const isReplying = replyingDoubtId === doubt.id
 
@@ -771,13 +785,13 @@ function AdminProjectDetailContent() {
             }
           />
 
-          {projectFollowUps.length === 0 ? (
+          {!Array.isArray(projectFollowUps) || projectFollowUps.length === 0 ? (
             <p className="text-xs text-text-muted py-8 text-center">
               No follow-ups recorded for this project.
             </p>
           ) : (
             <div className="space-y-3">
-              {projectFollowUps.map((fu) => (
+              {(Array.isArray(projectFollowUps) ? projectFollowUps : []).map((fu) => (
                 <div
                   key={fu.id}
                   className="p-3.5 rounded-xl border border-border bg-surface text-xs space-y-1.5"
@@ -828,12 +842,12 @@ function AdminProjectDetailContent() {
           </form>
 
           <div className="space-y-3">
-            {projectNotes.length === 0 ? (
+            {!Array.isArray(projectNotes) || projectNotes.length === 0 ? (
               <p className="text-xs text-text-muted py-6 text-center">
                 No notes logged for this project yet.
               </p>
             ) : (
-              projectNotes.map((note) => (
+              (Array.isArray(projectNotes) ? projectNotes : []).map((note) => (
                 <div
                   key={note.id}
                   className="p-3.5 rounded-lg border border-border bg-white text-xs space-y-1.5"

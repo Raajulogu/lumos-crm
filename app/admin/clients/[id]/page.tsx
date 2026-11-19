@@ -165,16 +165,16 @@ function ClientDetailContent() {
   }
 
   // Calculations
-  const deliveredProjects = clientProjects.filter((p) => p.status === 'delivered')
-  const inProgressProjects = clientProjects.filter(
+  const deliveredProjects = (Array.isArray(clientProjects) ? clientProjects : []).filter((p) => p && p.status === 'delivered')
+  const inProgressProjects = (Array.isArray(clientProjects) ? clientProjects : []).filter(
     (p) =>
-      p.status === 'in_progress' ||
+      p && (p.status === 'in_progress' ||
       p.status === 'under_review' ||
-      p.status === 'new',
+      p.status === 'new'),
   )
-  const totalBilled = clientProjects.reduce((sum, p) => sum + p.budget, 0)
-  const totalCost = clientProjects.reduce(
-    (sum, p) => sum + (p.actualCost || 0),
+  const totalBilled = (Array.isArray(clientProjects) ? clientProjects : []).reduce((sum, p) => sum + (Number(p?.budget) || 0), 0)
+  const totalCost = (Array.isArray(clientProjects) ? clientProjects : []).reduce(
+    (sum, p) => sum + (Number(p?.actualCost) || 0),
     0,
   )
   const estimatedProfit = totalBilled - totalCost

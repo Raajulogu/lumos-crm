@@ -118,30 +118,40 @@ function AdminDashboardContent() {
 
   // Dynamic calculations from real API data
   const activeProjects = useMemo(
-    () => projects.filter((p) => p.status !== 'delivered'),
+    () => (Array.isArray(projects) ? projects.filter((p) => p && p.status !== 'delivered') : []),
     [projects],
   )
   const overdueProjects = useMemo(
-    () => activeProjects.filter((p) => isOverdue(p.deliveryDate, p.status)),
+    () => activeProjects.filter((p) => p && isOverdue(p.deliveryDate, p.status)),
     [activeProjects],
   )
   const upcomingProjects = useMemo(
     () =>
       activeProjects.filter((p) => {
+        if (!p) return false
         const days = getDaysUntil(p.deliveryDate)
         return days >= 0 && days <= 7
       }),
     [activeProjects],
   )
-  const openDoubts = useMemo(() => doubts.filter((d) => d.status === 'open'), [doubts])
+  const openDoubts = useMemo(
+    () => (Array.isArray(doubts) ? doubts.filter((d) => d && d.status === 'open') : []),
+    [doubts],
+  )
   const pendingFollowups = useMemo(
-    () => followups.filter((f) => f.status === 'pending'),
+    () => (Array.isArray(followups) ? followups.filter((f) => f && f.status === 'pending') : []),
     [followups],
   )
 
   // Fast map joins
-  const clientMap = useMemo(() => new Map(clients.map((c) => [c.id, c])), [clients])
-  const employeeMap = useMemo(() => new Map(employees.map((e) => [e.id, e])), [employees])
+  const clientMap = useMemo(
+    () => new Map(Array.isArray(clients) ? clients.map((c) => [c.id || (c as any)._id, c]) : []),
+    [clients],
+  )
+  const employeeMap = useMemo(
+    () => new Map(Array.isArray(employees) ? employees.map((e) => [e.id || (e as any)._id, e]) : []),
+    [employees],
+  )
 
   const statCards = [
     {
@@ -284,22 +294,21 @@ function AdminDashboardContent() {
             ) : (
               <div className="divide-y divide-border">
                 {urgentAttentionProjects.map((proj) => {
-                  const client = clientMap.get(proj.clientId)
-                  const primaryEmp = proj.primaryEmployeeId
-                    ? employeeMap.get(proj.primaryEmployeeId)
-                    : null
+                  const projId = proj.id || (proj as any)._id
+                  const client = (proj as any).client || clientMap.get(proj.clientId)
+                  const primaryEmp = (proj as any).primaryEmployee || (proj.primaryEmployeeId ? employeeMap.get(proj.primaryEmployeeId) : null)
                   const isLate = isOverdue(proj.deliveryDate, proj.status)
                   const daysLeft = getDaysUntil(proj.deliveryDate)
 
                   return (
                     <div
-                      key={proj.id}
+                      key={projId}
                       className="py-3.5 first:pt-0 last:pb-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                     >
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <Link
-                            href={`/admin/projects/${proj.id}`}
+                            href={`/admin/projects/${projId}`}
                             className="text-sm font-semibold text-text-primary hover:text-brand-600 truncate"
                           >
                             {proj.name}

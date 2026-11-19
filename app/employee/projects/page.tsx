@@ -103,24 +103,25 @@ function EmployeeProjectsContent() {
   const clientMap = useMemo(
     () =>
       new Map(
-        clients.map((c) => [
-          c.id,
+        (Array.isArray(clients) ? clients : []).map((c) => [
+          c.id || (c as any)._id,
           { name: c.fullName, company: c.companyName },
         ]),
       ),
     [clients],
   )
   const categoryMap = useMemo(
-    () => new Map(categories.map((cat) => [cat.id, cat])),
+    () => new Map((Array.isArray(categories) ? categories : []).map((cat) => [cat.id || (cat as any)._id, cat])),
     [categories],
   )
 
   // My assigned projects only
   const myAllProjects = useMemo(() => {
-    return projects.filter(
+    return (Array.isArray(projects) ? projects : []).filter(
       (p) =>
+        !p ? false :
         p.primaryEmployeeId === currentEmpId ||
-        p.additionalMemberIds?.includes(currentEmpId) ||
+        (Array.isArray(p.additionalMemberIds) && p.additionalMemberIds.includes(currentEmpId)) ||
         isDemoAdminPreview,
     )
   }, [projects, currentEmpId, isDemoAdminPreview])
@@ -128,10 +129,15 @@ function EmployeeProjectsContent() {
   // Filtered dataset
   const filteredProjects = useMemo(() => {
     return myAllProjects.filter((project) => {
-      const client = clientMap.get(project.clientId)
+      if (!project) return false
+      const client = (project as any).client || clientMap.get(project.clientId)
+      const projectName = project.name || ''
+      const companyName = client?.company || client?.companyName || (project as any).clientName || ''
+      const query = (search || '').toLowerCase()
+
       const matchesSearch =
-        project.name.toLowerCase().includes(search.toLowerCase()) ||
-        (client?.company.toLowerCase().includes(search.toLowerCase()) ?? false)
+        projectName.toLowerCase().includes(query) ||
+        companyName.toLowerCase().includes(query)
 
       let matchesStatus = true
       if (statusFilter === 'all') matchesStatus = true
@@ -146,15 +152,15 @@ function EmployeeProjectsContent() {
 
   // Metrics
   const activeCount = useMemo(
-    () => myAllProjects.filter((p) => p.status !== 'delivered').length,
+    () => myAllProjects.filter((p) => p && p.status !== 'delivered').length,
     [myAllProjects],
   )
   const overdueCount = useMemo(
-    () => myAllProjects.filter((p) => isOverdue(p.deliveryDate, p.status)).length,
+    () => myAllProjects.filter((p) => p && isOverdue(p.deliveryDate, p.status)).length,
     [myAllProjects],
   )
   const deliveredCount = useMemo(
-    () => myAllProjects.filter((p) => p.status === 'delivered').length,
+    () => myAllProjects.filter((p) => p && p.status === 'delivered').length,
     [myAllProjects],
   )
 
@@ -303,37 +309,39 @@ function EmployeeProjectsContent() {
                   </thead>
                   <tbody className="divide-y divide-border bg-white">
                     {paginatedProjects.map((proj) => {
-                      const client = clientMap.get(proj.clientId)
+                      const projId = proj.id || (proj as any)._id
+                      const client = (proj as any).client || clientMap.get(proj.clientId)
                       const isLate = isOverdue(proj.deliveryDate, proj.status)
                       const daysLeft = getDaysUntil(proj.deliveryDate)
 
                       return (
                         <tr
-                          key={proj.id}
+                          key={projId}
                           className="hover:bg-surface/50 transition-colors"
                         >
                           <td className="py-3.5 px-4 max-w-[260px]">
                             <Link
-                              href={`/employee/projects/${proj.id}`}
+                              href={`/employee/projects/${projId}`}
                               className="font-semibold text-text-primary hover:text-brand-600 truncate block text-sm"
                             >
                               {proj.name}
                             </Link>
                             <span className="text-[11px] text-text-muted truncate block mt-0.5">
-                              {client?.company || 'Client'}
+                              {client?.company || client?.companyName || (proj as any).clientName || 'Client'}
                             </span>
                           </td>
 
                           <td className="py-3.5 px-4">
                             <div className="flex flex-wrap gap-1">
-                              {proj.serviceCategories?.slice(0, 2).map((catId) => {
-                                const cat = categoryMap.get(catId)
+                              {Array.isArray(proj.serviceCategories) && proj.serviceCategories.slice(0, 2).map((catItem: any) => {
+                                const catId = typeof catItem === 'object' && catItem !== null ? catItem.id || catItem._id : catItem
+                                const catName = typeof catItem === 'object' && catItem !== null ? catItem.name : categoryMap.get(catId)?.name || catId
                                 return (
                                   <span
                                     key={catId}
                                     className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-700"
                                   >
-                                    {cat?.name || catId}
+                                    {catName}
                                   </span>
                                 )
                               })}
@@ -382,7 +390,7 @@ function EmployeeProjectsContent() {
                           </td>
 
                           <td className="py-3.5 px-4 text-right">
-                            <Link href={`/employee/projects/${proj.id}`}>
+                            <Link href={`/employee/projects/${projId}`}>
                               <Button variant="secondary" size="sm">
                                 Open Workspace
                               </Button>
@@ -400,21 +408,22 @@ function EmployeeProjectsContent() {
           {/* Mobile Card View */}
           <div className="grid grid-cols-1 gap-3 md:hidden">
             {paginatedProjects.map((proj) => {
-              const client = clientMap.get(proj.clientId)
+              const projId = proj.id || (proj as any)._id
+              const client = (proj as any).client || clientMap.get(proj.clientId)
               const isLate = isOverdue(proj.deliveryDate, proj.status)
 
               return (
-                <Card key={proj.id} padding="md">
+                <Card key={projId} padding="md">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <Link
-                        href={`/employee/projects/${proj.id}`}
+                        href={`/employee/projects/${projId}`}
                         className="font-semibold text-text-primary hover:text-brand-600 text-sm truncate block"
                       >
                         {proj.name}
                       </Link>
                       <p className="text-xs text-text-muted mt-0.5">
-                        {client?.company}
+                        {client?.company || client?.companyName || (proj as any).clientName || 'Client'}
                       </p>
                     </div>
                     <span
@@ -436,7 +445,7 @@ function EmployeeProjectsContent() {
                       Due {formatDate(proj.deliveryDate)}
                     </span>
 
-                    <Link href={`/employee/projects/${proj.id}`}>
+                    <Link href={`/employee/projects/${projId}`}>
                       <Button variant="secondary" size="sm">
                         Open Workspace
                       </Button>

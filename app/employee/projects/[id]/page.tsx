@@ -226,12 +226,14 @@ function EmployeeProjectDetailContent() {
 
   const isLate = isOverdue(project.deliveryDate, project.status)
   const daysLeft = getDaysUntil(project.deliveryDate)
-  const myDoubtsCount = projectDoubts.filter((d) => d.status === 'open').length
+  const myDoubtsCount = Array.isArray(projectDoubts)
+    ? projectDoubts.filter((d) => d && d.status === 'open').length
+    : 0
 
   const tabs = [
     { id: 'scope', label: 'Scope & Guidelines' },
     { id: 'doubts', label: 'My Doubts & Questions', count: myDoubtsCount },
-    { id: 'notes', label: 'Deliverable Notes', count: projectNotes.length },
+    { id: 'notes', label: 'Deliverable Notes', count: Array.isArray(projectNotes) ? projectNotes.length : 0 },
   ]
 
   return (
@@ -361,14 +363,15 @@ function EmployeeProjectDetailContent() {
               Required Services
             </h4>
             <div className="flex flex-wrap gap-2">
-              {project.serviceCategories.map((catId) => {
-                const cat = categoryMap.get(catId)
+              {Array.isArray(project.serviceCategories) && project.serviceCategories.map((catItem: any) => {
+                const catId = typeof catItem === 'object' && catItem !== null ? catItem.id || catItem._id : catItem
+                const cat = typeof catItem === 'object' && catItem !== null ? catItem : categoryMap.get(catId)
                 return (
                   <span
                     key={catId}
                     className="px-3 py-1 rounded-lg bg-brand-50 border border-brand-200 text-xs font-medium text-brand-700"
                   >
-                    {cat?.name || catId}
+                    {cat?.name || (typeof catItem === 'string' ? catItem : 'Service')}
                   </span>
                 )
               })}
@@ -396,14 +399,14 @@ function EmployeeProjectDetailContent() {
               }
             />
 
-            {projectDoubts.length === 0 ? (
+            {!Array.isArray(projectDoubts) || projectDoubts.length === 0 ? (
               <div className="py-12 text-center text-sm text-text-muted">
                 <CheckCircle2 className="h-8 w-8 text-success mx-auto mb-2 opacity-80" />
                 No doubts submitted for this project. If you hit any roadblock, click &quot;Ask a Question&quot; above.
               </div>
             ) : (
               <div className="space-y-4">
-                {projectDoubts.map((doubt) => (
+                {(Array.isArray(projectDoubts) ? projectDoubts : []).map((doubt) => (
                   <div
                     key={doubt.id}
                     className="p-4 rounded-xl border border-border bg-white shadow-sm space-y-3 text-xs"
@@ -489,12 +492,12 @@ function EmployeeProjectDetailContent() {
           </form>
 
           <div className="space-y-3">
-            {projectNotes.length === 0 ? (
+            {!Array.isArray(projectNotes) || projectNotes.length === 0 ? (
               <p className="text-xs text-text-muted py-6 text-center">
                 No updates posted yet.
               </p>
             ) : (
-              projectNotes.map((note) => (
+              (Array.isArray(projectNotes) ? projectNotes : []).map((note) => (
                 <div
                   key={note.id}
                   className="p-3.5 rounded-lg border border-border bg-white text-xs space-y-1.5"

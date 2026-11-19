@@ -99,11 +99,17 @@ function AdminAnalyticsContent() {
 
   // Financial calculations from real projects
   const totalRevenue = useMemo(() => {
-    return projects.reduce((sum, p) => sum + p.budget, 0)
+    return (Array.isArray(projects) ? projects : []).reduce(
+      (sum, p) => sum + (Number(p?.budget) || 0),
+      0,
+    )
   }, [projects])
 
   const totalCost = useMemo(() => {
-    return projects.reduce((sum, p) => sum + (p.actualCost || 0), 0)
+    return (Array.isArray(projects) ? projects : []).reduce(
+      (sum, p) => sum + (Number(p?.actualCost) || 0),
+      0,
+    )
   }, [projects])
 
   const netProfit = totalRevenue - totalCost
@@ -112,12 +118,16 @@ function AdminAnalyticsContent() {
   // Month-by-month financial bar data
   const monthlyTrends = useMemo(() => {
     const monthMap = new Map<string, { revenue: number; cost: number; profit: number }>()
-    projects.forEach((p) => {
-      const d = new Date(p.deliveryDate || p.createdAt)
-      const key = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+    ;(Array.isArray(projects) ? projects : []).forEach((p) => {
+      if (!p) return
+      const dateStr = p.deliveryDate || p.createdAt
+      const d = dateStr ? new Date(dateStr) : null
+      const key = d && !isNaN(d.getTime())
+        ? d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+        : 'Current Period'
       const existing = monthMap.get(key) || { revenue: 0, cost: 0, profit: 0 }
-      existing.revenue += p.budget
-      existing.cost += p.actualCost || 0
+      existing.revenue += Number(p.budget) || 0
+      existing.cost += Number(p.actualCost) || 0
       existing.profit = existing.revenue - existing.cost
       monthMap.set(key, existing)
     })
@@ -144,19 +154,23 @@ function AdminAnalyticsContent() {
   // Service Category Breakdown
   const categoryStats = useMemo(() => {
     const map = new Map<string, { count: number; totalBudget: number }>()
-    categories.forEach((c) => map.set(c.id, { count: 0, totalBudget: 0 }))
+    ;(Array.isArray(categories) ? categories : []).forEach((c) => {
+      map.set(c.id || (c as any)._id, { count: 0, totalBudget: 0 })
+    })
 
-    projects.forEach((p) => {
-      p.serviceCategories?.forEach((catId) => {
+    ;(Array.isArray(projects) ? projects : []).forEach((p) => {
+      if (!p || !Array.isArray(p.serviceCategories)) return
+      p.serviceCategories.forEach((catItem: any) => {
+        const catId = typeof catItem === 'object' && catItem !== null ? catItem.id || catItem._id : catItem
         const existing = map.get(catId)
         if (existing) {
           existing.count += 1
-          existing.totalBudget += p.budget / (p.serviceCategories.length || 1)
+          existing.totalBudget += (Number(p.budget) || 0) / (p.serviceCategories.length || 1)
         }
       })
     })
 
-    return categories.map((c) => ({
+    return (Array.isArray(categories) ? categories : []).map((c) => ({
       name: c.name,
       color: c.color,
       count: map.get(c.id)?.count || 0,

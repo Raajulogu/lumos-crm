@@ -17,8 +17,10 @@ export function cn(...inputs: ClassValue[]): string {
 
 // ─── Date Formatting ─────────────────────────────────────────
 
-export function formatDate(dateStr: string): string {
+export function formatDate(dateStr?: string | null): string {
+  if (!dateStr) return 'N/A'
   const date = new Date(dateStr)
+  if (isNaN(date.getTime())) return 'N/A'
   return date.toLocaleDateString('en-IN', {
     day: '2-digit',
     month: 'short',
@@ -26,8 +28,10 @@ export function formatDate(dateStr: string): string {
   })
 }
 
-export function formatDateTime(dateStr: string): string {
+export function formatDateTime(dateStr?: string | null): string {
+  if (!dateStr) return 'N/A'
   const date = new Date(dateStr)
+  if (isNaN(date.getTime())) return 'N/A'
   return date.toLocaleString('en-IN', {
     day: '2-digit',
     month: 'short',
@@ -46,8 +50,10 @@ export function getSafeNow(): Date {
   return APP_MOCK_DATE
 }
 
-export function formatRelativeTime(dateStr: string): string {
+export function formatRelativeTime(dateStr?: string | null): string {
+  if (!dateStr) return 'just now'
   const date = new Date(dateStr)
+  if (isNaN(date.getTime())) return 'just now'
   const now = getSafeNow()
   const diffMs = now.getTime() - date.getTime()
   const diffSecs = Math.floor(diffMs / 1000)
@@ -63,8 +69,10 @@ export function formatRelativeTime(dateStr: string): string {
   return formatDate(dateStr)
 }
 
-export function getDaysUntil(dateStr: string): number {
+export function getDaysUntil(dateStr?: string | null): number {
+  if (!dateStr) return 0
   const date = new Date(dateStr)
+  if (isNaN(date.getTime())) return 0
   const now = getSafeNow()
   // Reset time to compare dates only
   date.setHours(0, 0, 0, 0)
@@ -73,29 +81,32 @@ export function getDaysUntil(dateStr: string): number {
   return Math.ceil(diffMs / (1000 * 60 * 60 * 24))
 }
 
-export function isOverdue(deliveryDate: string, status: ProjectStatus): boolean {
-  if (status === 'delivered') return false
+export function isOverdue(deliveryDate?: string | null, status?: ProjectStatus): boolean {
+  if (!deliveryDate || status === 'delivered') return false
   return getDaysUntil(deliveryDate) < 0
 }
 
 // ─── Currency ─────────────────────────────────────────────────
 
-export function formatCurrency(amount: number): string {
+export function formatCurrency(amount?: number | string | null): string {
+  const num = typeof amount === 'number' ? amount : Number(amount) || 0
+  const safe = isNaN(num) ? 0 : num
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
     currency: 'INR',
     maximumFractionDigits: 0,
-  }).format(amount)
+  }).format(safe)
 }
 
-export function calculateProfit(budget: number, actualCost?: number): number | null {
+export function calculateProfit(budget?: number | null, actualCost?: number | null): number | null {
+  if (budget === undefined || budget === null) return null
   if (actualCost === undefined || actualCost === null) return null
-  return budget - actualCost
+  return (Number(budget) || 0) - (Number(actualCost) || 0)
 }
 
 // ─── Status Helpers ───────────────────────────────────────────
 
-export function getStatusLabel(status: ProjectStatus): string {
+export function getStatusLabel(status?: ProjectStatus | string | null): string {
   const labels: Record<ProjectStatus, string> = {
     new: 'New',
     in_progress: 'In Progress',
@@ -103,10 +114,11 @@ export function getStatusLabel(status: ProjectStatus): string {
     completed: 'Completed',
     delivered: 'Delivered',
   }
-  return labels[status]
+  if (!status) return 'New'
+  return labels[status as ProjectStatus] || status
 }
 
-export function getStatusColor(status: ProjectStatus): string {
+export function getStatusColor(status?: ProjectStatus | string | null): string {
   const colors: Record<ProjectStatus, string> = {
     new: 'bg-brand-100 text-brand-700',
     in_progress: 'bg-warning-light text-warning-dark',
@@ -114,27 +126,30 @@ export function getStatusColor(status: ProjectStatus): string {
     completed: 'bg-success-light text-success-dark',
     delivered: 'bg-success-light text-success-dark',
   }
-  return colors[status]
+  if (!status) return 'bg-slate-100 text-slate-700'
+  return colors[status as ProjectStatus] || 'bg-slate-100 text-slate-700'
 }
 
-export function getPriorityLabel(priority: ProjectPriority): string {
+export function getPriorityLabel(priority?: ProjectPriority | string | null): string {
   const labels: Record<ProjectPriority, string> = {
     low: 'Low',
     medium: 'Medium',
     high: 'High',
     urgent: 'Urgent',
   }
-  return labels[priority]
+  if (!priority) return 'Medium'
+  return labels[priority as ProjectPriority] || priority
 }
 
-export function getPriorityColor(priority: ProjectPriority): string {
+export function getPriorityColor(priority?: ProjectPriority | string | null): string {
   const colors: Record<ProjectPriority, string> = {
     low: 'bg-surface text-text-secondary border border-border',
     medium: 'bg-brand-100 text-brand-700',
     high: 'bg-warning-light text-warning-dark',
     urgent: 'bg-danger-light text-danger-dark',
   }
-  return colors[priority]
+  if (!priority) return 'bg-brand-100 text-brand-700'
+  return colors[priority as ProjectPriority] || 'bg-surface text-text-secondary border border-border'
 }
 
 export function getNotificationIcon(type: NotificationType): string {

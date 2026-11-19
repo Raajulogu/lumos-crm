@@ -107,9 +107,12 @@ function AdminEmployeeDetailContent() {
   }, [empId])
 
   // Lookups
-  const clientMap = useMemo(() => new Map(clients.map((c) => [c.id, c])), [clients])
+  const clientMap = useMemo(
+    () => new Map((Array.isArray(clients) ? clients : []).map((c) => [c.id || (c as any)._id, c])),
+    [clients],
+  )
 
-  const assignedProjects = projects
+  const assignedProjects = Array.isArray(projects) ? projects : []
 
   if (loading) {
     return (

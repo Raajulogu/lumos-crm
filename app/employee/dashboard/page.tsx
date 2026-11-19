@@ -98,25 +98,27 @@ function EmployeeDashboardContent() {
 
   // Filter projects assigned to this employee (if employee token, backend already filters)
   const myProjects = useMemo(() => {
-    return projects.filter(
+    return (Array.isArray(projects) ? projects : []).filter(
       (p) =>
+        !p ? false :
         p.primaryEmployeeId === currentEmpId ||
-        p.additionalMemberIds?.includes(currentEmpId) ||
+        (Array.isArray(p.additionalMemberIds) && p.additionalMemberIds.includes(currentEmpId)) ||
         isDemoAdminPreview,
     )
   }, [projects, currentEmpId, isDemoAdminPreview])
 
   const activeProjects = useMemo(
-    () => myProjects.filter((p) => p.status !== 'delivered'),
+    () => myProjects.filter((p) => p && p.status !== 'delivered'),
     [myProjects],
   )
   const overdueProjects = useMemo(
-    () => activeProjects.filter((p) => isOverdue(p.deliveryDate, p.status)),
+    () => activeProjects.filter((p) => p && isOverdue(p.deliveryDate, p.status)),
     [activeProjects],
   )
   const upcomingDeadlines = useMemo(
     () =>
       activeProjects.filter((p) => {
+        if (!p) return false
         const days = getDaysUntil(p.deliveryDate)
         return days >= 0 && days <= 7
       }),
@@ -125,8 +127,9 @@ function EmployeeDashboardContent() {
 
   const myFollowUps = useMemo(
     () =>
-      followups.filter(
+      (Array.isArray(followups) ? followups : []).filter(
         (f) =>
+          !f ? false :
           (f.assignedToId === currentEmpId || isDemoAdminPreview) &&
           f.status === 'pending',
       ),
@@ -168,7 +171,7 @@ function EmployeeDashboardContent() {
   const clientMap = useMemo(
     () =>
       new Map(
-        clients.map((c) => [c.id, { name: c.fullName, company: c.companyName }]),
+        (Array.isArray(clients) ? clients : []).map((c) => [c.id || (c as any)._id, { name: c.fullName, company: c.companyName }]),
       ),
     [clients],
   )
@@ -291,19 +294,20 @@ function EmployeeDashboardContent() {
             ) : (
               <div className="divide-y divide-border">
                 {activeProjects.map((proj) => {
-                  const client = clientMap.get(proj.clientId)
+                  const projId = proj.id || (proj as any)._id
+                  const client = (proj as any).client || clientMap.get(proj.clientId)
                   const isLate = isOverdue(proj.deliveryDate, proj.status)
                   const daysLeft = getDaysUntil(proj.deliveryDate)
 
                   return (
                     <div
-                      key={proj.id}
+                      key={projId}
                       className="py-3.5 first:pt-0 last:pb-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                     >
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <Link
-                            href={`/employee/projects/${proj.id}`}
+                            href={`/employee/projects/${projId}`}
                             className="text-sm font-semibold text-text-primary hover:text-brand-600 truncate"
                           >
                             {proj.name}
@@ -328,7 +332,7 @@ function EmployeeDashboardContent() {
                           <span>
                             Client:{' '}
                             <strong className="text-text-primary">
-                              {client?.company || 'Client'}
+                              {client?.company || client?.companyName || (proj as any).clientName || 'Client'}
                             </strong>
                           </span>
                         </div>

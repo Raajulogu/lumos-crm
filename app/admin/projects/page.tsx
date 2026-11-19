@@ -120,68 +120,81 @@ function AdminProjectsContent() {
   }, [])
 
   // Lookup maps
-  const clientMap = useMemo(() => new Map(clients.map((c) => [c.id, c])), [clients])
-  const employeeMap = useMemo(() => new Map(employees.map((e) => [e.id, e])), [employees])
-  const categoryMap = useMemo(() => new Map(categories.map((cat) => [cat.id, cat])), [categories])
+  const clientMap = useMemo(
+    () => new Map(Array.isArray(clients) ? clients.map((c) => [c.id || (c as any)._id, c]) : []),
+    [clients],
+  )
+  const employeeMap = useMemo(
+    () => new Map(Array.isArray(employees) ? employees.map((e) => [e.id || (e as any)._id, e]) : []),
+    [employees],
+  )
+  const categoryMap = useMemo(
+    () => new Map(Array.isArray(categories) ? categories.map((cat) => [cat.id || (cat as any)._id, cat]) : []),
+    [categories],
+  )
 
   // Metrics calculated from real API projects
   const activeCount = useMemo(
-    () => projects.filter((p) => p.status !== 'delivered').length,
+    () => (Array.isArray(projects) ? projects.filter((p) => p && p.status !== 'delivered').length : 0),
     [projects],
   )
   const overdueCount = useMemo(
-    () => projects.filter((p) => isOverdue(p.deliveryDate, p.status)).length,
+    () => (Array.isArray(projects) ? projects.filter((p) => p && isOverdue(p.deliveryDate, p.status)).length : 0),
     [projects],
   )
   const deliveredCount = useMemo(
-    () => projects.filter((p) => p.status === 'delivered').length,
+    () => (Array.isArray(projects) ? projects.filter((p) => p && p.status === 'delivered').length : 0),
     [projects],
   )
   const totalPipelineBudget = useMemo(
-    () => projects.reduce((sum, p) => sum + p.budget, 0),
+    () => (Array.isArray(projects) ? projects.reduce((sum, p) => sum + (Number(p?.budget) || 0), 0) : 0),
     [projects],
   )
 
   // Filter options
   const statusOptions = [
-    { id: 'all', label: 'All Projects', count: projects.length },
+    { id: 'all', label: 'All Projects', count: Array.isArray(projects) ? projects.length : 0 },
     { id: 'active', label: 'Active', count: activeCount },
     { id: 'overdue', label: 'Overdue', count: overdueCount },
     {
       id: 'new',
       label: 'New',
-      count: projects.filter((p) => p.status === 'new').length,
+      count: Array.isArray(projects) ? projects.filter((p) => p?.status === 'new').length : 0,
     },
     {
       id: 'in_progress',
       label: 'In Progress',
-      count: projects.filter((p) => p.status === 'in_progress').length,
+      count: Array.isArray(projects) ? projects.filter((p) => p?.status === 'in_progress').length : 0,
     },
     {
       id: 'under_review',
       label: 'Review',
-      count: projects.filter((p) => p.status === 'under_review').length,
+      count: Array.isArray(projects) ? projects.filter((p) => p?.status === 'under_review').length : 0,
     },
     {
       id: 'completed',
       label: 'Completed',
-      count: projects.filter((p) => p.status === 'completed').length,
+      count: Array.isArray(projects) ? projects.filter((p) => p?.status === 'completed').length : 0,
     },
     { id: 'delivered', label: 'Delivered', count: deliveredCount },
   ]
 
   // Filtered dataset
   const filteredProjects = useMemo(() => {
-    return projects.filter((project) => {
-      const client = clientMap.get(project.clientId)
-      const emp = project.primaryEmployeeId
-        ? employeeMap.get(project.primaryEmployeeId)
-        : null
+    return (Array.isArray(projects) ? projects : []).filter((project) => {
+      if (!project) return false
+      const client = (project as any).client || clientMap.get(project.clientId)
+      const emp = (project as any).primaryEmployee || (project.primaryEmployeeId ? employeeMap.get(project.primaryEmployeeId) : null)
+
+      const projectName = project.name || ''
+      const companyName = client?.companyName || (project as any).clientName || ''
+      const employeeName = emp?.fullName || (project as any).employeeName || ''
+      const query = (search || '').toLowerCase()
 
       const matchesSearch =
-        project.name.toLowerCase().includes(search.toLowerCase()) ||
-        (client?.companyName.toLowerCase().includes(search.toLowerCase()) ?? false) ||
-        (emp?.fullName.toLowerCase().includes(search.toLowerCase()) ?? false)
+        projectName.toLowerCase().includes(query) ||
+        companyName.toLowerCase().includes(query) ||
+        employeeName.toLowerCase().includes(query)
 
       let matchesStatus = true
       if (statusFilter === 'all') {
@@ -197,7 +210,10 @@ function AdminProjectsContent() {
       const matchesCategory =
         categoryFilter === 'all'
           ? true
-          : project.serviceCategories?.includes(categoryFilter)
+          : Array.isArray(project.serviceCategories) && project.serviceCategories.some((catId: any) => {
+              const id = typeof catId === 'object' && catId !== null ? catId.id || catId._id : catId
+              return id === categoryFilter
+            })
 
       const matchesEmployee =
         employeeFilter === 'all'
@@ -433,42 +449,42 @@ function AdminProjectsContent() {
                   </thead>
                   <tbody className="divide-y divide-border bg-white">
                     {paginatedProjects.map((proj) => {
-                      const client = clientMap.get(proj.clientId)
-                      const emp = proj.primaryEmployeeId
-                        ? employeeMap.get(proj.primaryEmployeeId)
-                        : null
+                      const projId = proj.id || (proj as any)._id
+                      const client = (proj as any).client || clientMap.get(proj.clientId)
+                      const emp = (proj as any).primaryEmployee || (proj.primaryEmployeeId ? employeeMap.get(proj.primaryEmployeeId) : null)
                       const isLate = isOverdue(proj.deliveryDate, proj.status)
                       const daysLeft = getDaysUntil(proj.deliveryDate)
 
                       return (
                         <tr
-                          key={proj.id}
+                          key={projId}
                           className="hover:bg-surface/50 transition-colors"
                         >
                           <td className="py-3.5 px-4 max-w-[240px]">
                             <div className="min-w-0">
                               <Link
-                                href={`/admin/projects/${proj.id}`}
+                                href={`/admin/projects/${projId}`}
                                 className="font-semibold text-text-primary hover:text-brand-600 truncate block text-sm"
                               >
                                 {proj.name}
                               </Link>
                               <span className="text-[11px] text-text-muted truncate block mt-0.5">
-                                {client?.companyName || 'Unknown Client'}
+                                {client?.companyName || (proj as any).clientName || 'Unknown Client'}
                               </span>
                             </div>
                           </td>
 
                           <td className="py-3.5 px-4">
                             <div className="flex flex-wrap gap-1 max-w-[180px]">
-                              {proj.serviceCategories?.slice(0, 2).map((catId) => {
-                                const cat = categoryMap.get(catId)
+                              {Array.isArray(proj.serviceCategories) && proj.serviceCategories.slice(0, 2).map((catItem: any) => {
+                                const catId = typeof catItem === 'object' && catItem !== null ? catItem.id || catItem._id : catItem
+                                const catName = typeof catItem === 'object' && catItem !== null ? catItem.name : categoryMap.get(catId)?.name || catId
                                 return (
                                   <span
                                     key={catId}
                                     className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-700"
                                   >
-                                    {cat?.name || catId}
+                                    {catName}
                                   </span>
                                 )
                               })}
@@ -479,7 +495,7 @@ function AdminProjectsContent() {
                             {emp ? (
                               <div className="flex items-center gap-1.5">
                                 <div className="h-6 w-6 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-bold text-[10px]">
-                                  {emp.fullName.charAt(0)}
+                                  {emp.fullName?.charAt(0) || 'E'}
                                 </div>
                                 <span className="font-medium text-text-primary truncate">
                                   {emp.fullName}
@@ -528,7 +544,7 @@ function AdminProjectsContent() {
                           </td>
 
                           <td className="py-3.5 px-4 text-right">
-                            <Link href={`/admin/projects/${proj.id}`}>
+                            <Link href={`/admin/projects/${projId}`}>
                               <Button variant="secondary" size="sm">
                                 View
                               </Button>
@@ -546,24 +562,23 @@ function AdminProjectsContent() {
           {/* Mobile Card List View */}
           <div className="grid grid-cols-1 gap-3 md:hidden">
             {paginatedProjects.map((proj) => {
-              const client = clientMap.get(proj.clientId)
-              const emp = proj.primaryEmployeeId
-                ? employeeMap.get(proj.primaryEmployeeId)
-                : null
+              const projId = proj.id || (proj as any)._id
+              const client = (proj as any).client || clientMap.get(proj.clientId)
+              const emp = (proj as any).primaryEmployee || (proj.primaryEmployeeId ? employeeMap.get(proj.primaryEmployeeId) : null)
               const isLate = isOverdue(proj.deliveryDate, proj.status)
 
               return (
-                <Card key={proj.id} padding="md">
+                <Card key={projId} padding="md">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <Link
-                        href={`/admin/projects/${proj.id}`}
+                        href={`/admin/projects/${projId}`}
                         className="font-semibold text-text-primary hover:text-brand-600 text-sm truncate block"
                       >
                         {proj.name}
                       </Link>
                       <p className="text-xs text-text-muted mt-0.5">
-                        {client?.companyName}
+                        {client?.companyName || (proj as any).clientName || 'Unknown Client'}
                       </p>
                     </div>
                     <span
@@ -600,7 +615,7 @@ function AdminProjectsContent() {
                       Due {formatDate(proj.deliveryDate)}
                     </span>
 
-                    <Link href={`/admin/projects/${proj.id}`}>
+                    <Link href={`/admin/projects/${projId}`}>
                       <Button variant="secondary" size="sm">
                         Inspect
                       </Button>
