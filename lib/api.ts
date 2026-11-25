@@ -21,6 +21,13 @@ import type {
   CreateEmployeePayload,
   ReminderConfig,
   GlobalReminderSettings,
+  ProjectTask,
+  TaskPunch,
+  AttendanceRecord,
+  CreateTaskPayload,
+  UpdateTaskPayload,
+  PunchOutPayload,
+  TaskStatus,
 } from './types'
 
 const RAW_API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://lumos-us.vercel.app/api/v1'
@@ -635,6 +642,14 @@ export const api = {
       })
       return res.data
     },
+
+    async updatePassword(id: string, password: string) {
+      const res = await apiRequest<{ success: boolean; message?: string }>(`/employees/${id}/password`, {
+        method: 'PATCH',
+        body: JSON.stringify({ password }),
+      })
+      return res.data || { success: true }
+    },
   },
 
   // ── Analytics ──
@@ -746,6 +761,399 @@ export const api = {
         body: JSON.stringify(payload),
       })
       return res.data
+    },
+  },
+
+  // ── Tasks & Work Punches ──
+  tasks: {
+    async listByProject(projectId: string): Promise<ProjectTask[]> {
+      try {
+        const res = await apiRequest<any>(`/projects/${projectId}/tasks`)
+        const list = extractList<ProjectTask>(res.data, 'tasks')
+        if (list && list.length > 0) return list
+      } catch {}
+      // Local fallback/sync
+      if (typeof window !== 'undefined') {
+        const stored = localStorage.getItem(`crm_tasks_${projectId}`)
+        if (stored) {
+          try {
+            return JSON.parse(stored)
+          } catch {}
+        }
+      }
+      return []
+    },
+
+    async listMyAssigned(params?: { status?: TaskStatus; search?: string }): Promise<ProjectTask[]> {
+      const q = new URLSearchParams()
+      if (params?.status && params.status !== ('all' as any)) q.set('status', params.status)
+      if (params?.search) q.set('search', params.search)
+      try {
+        const res = await apiRequest<any>(`/tasks/my-assigned?${q.toString()}`)
+        const list = extractList<ProjectTask>(res.data, 'tasks')
+        if (list && list.length > 0) return list
+      } catch {}
+      if (typeof window !== 'undefined') {
+        try {
+          const userStr = localStorage.getItem('crm_active_user')
+          const user = userStr ? JSON.parse(userStr) : null
+          const allTasks: ProjectTask[] = []
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i)
+            if (k && k.startsWith('crm_tasks_')) {
+              const val = JSON.parse(localStorage.getItem(k) || '[]')
+              allTasks.push(...val)
+            }
+          }
+          let filtered = allTasks
+          if (user?.id) {
+            filtered = allTasks.filter((t) => t.assignedToId === user.id)
+          }
+          if (params?.status && params.status !== ('all' as any)) {
+            filtered = filtered.filter((t) => t.status === params.status)
+          }
+          if (params?.search) {
+            const s = params.search.toLowerCase()
+            filtered = filtered.filter((t) => t.title.toLowerCase().includes(s) || (t.description || '').toLowerCase().includes(s))
+          }
+          return filtered
+        } catch {}
+      }
+      return []
+    },
+
+    async create(projectId: string, payload: CreateTaskPayload): Promise<ProjectTask> {
+      let createdTask: ProjectTask | null = null
+      try {
+        const res = await apiRequest<ProjectTask>(`/projects/${projectId}/tasks`, {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        })
+        createdTask = res.data
+      } catch {}
+
+      if (!createdTask) {
+        createdTask = {
+          id: `task-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          projectId,
+          title: payload.title,
+          description: payload.description || '',
+          assignedToId: payload.assignedToId || null,
+          status: payload.status || 'todo',
+          priority: payload.priority || 'medium',
+          dueDate: payload.dueDate,
+          estimatedHours: payload.estimatedHours,
+          totalLoggedMinutes: 0,
+          totalPunchesCount: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }
+      }
+
+      if (typeof window !== 'undefined') {
+        const key = `crm_tasks_${projectId}`
+        const current: ProjectTask[] = JSON.parse(localStorage.getItem(key) || '[]')
+        const updated = [createdTask, ...current.filter((t) => t.id !== createdTask!.id)]
+        localStorage.setItem(key, JSON.stringify(updated))
+      }
+      return createdTask
+    },
+
+    async update(taskId: string, projectId: string, payload: UpdateTaskPayload): Promise<ProjectTask> {
+      let updatedTask: ProjectTask | null = null
+      try {
+        const res = await apiRequest<ProjectTask>(`/tasks/${taskId}`, {
+          method: 'PUT',
+          body: JSON.stringify(payload),
+        })
+        updatedTask = res.data
+      } catch {}
+
+      if (typeof window !== 'undefined') {
+        const key = `crm_tasks_${projectId}`
+        const current: ProjectTask[] = JSON.parse(localStorage.getItem(key) || '[]')
+        const idx = current.findIndex((t) => t.id === taskId)
+        if (idx !== -1) {
+          current[idx] = { ...current[idx], ...payload, updatedAt: new Date().toISOString() }
+          localStorage.setItem(key, JSON.stringify(current))
+          return current[idx]
+        }
+      }
+
+      return updatedTask || ({ id: taskId, projectId, ...payload } as any)
+    },
+
+    async delete(taskId: string, projectId: string): Promise<{ success: boolean }> {
+      try {
+        await apiRequest(`/tasks/${taskId}`, { method: 'DELETE' })
+      } catch {}
+      if (typeof window !== 'undefined') {
+        const key = `crm_tasks_${projectId}`
+        const current: ProjectTask[] = JSON.parse(localStorage.getItem(key) || '[]')
+        localStorage.setItem(key, JSON.stringify(current.filter((t) => t.id !== taskId)))
+      }
+      return { success: true }
+    },
+
+    async assign(taskId: string, projectId: string, employeeId: string | null, employeeObj?: any): Promise<ProjectTask> {
+      try {
+        await apiRequest(`/tasks/${taskId}/assign`, {
+          method: 'PATCH',
+          body: JSON.stringify({ employeeId }),
+        })
+      } catch {}
+      if (typeof window !== 'undefined') {
+        const key = `crm_tasks_${projectId}`
+        const current: ProjectTask[] = JSON.parse(localStorage.getItem(key) || '[]')
+        const idx = current.findIndex((t) => t.id === taskId)
+        if (idx !== -1) {
+          current[idx] = {
+            ...current[idx],
+            assignedToId: employeeId,
+            assignedTo: employeeObj || null,
+            updatedAt: new Date().toISOString(),
+          }
+          localStorage.setItem(key, JSON.stringify(current))
+          return current[idx]
+        }
+      }
+      return { id: taskId, projectId, assignedToId: employeeId, assignedTo: employeeObj } as any
+    },
+
+    async bulkAssign(taskIds: string[], projectId: string, employeeId: string | null, employeeObj?: any): Promise<{ success: boolean; count: number }> {
+      try {
+        await apiRequest(`/projects/${projectId}/tasks/bulk-assign`, {
+          method: 'POST',
+          body: JSON.stringify({ taskIds, employeeId }),
+        })
+      } catch {}
+      if (typeof window !== 'undefined') {
+        const key = `crm_tasks_${projectId}`
+        const current: ProjectTask[] = JSON.parse(localStorage.getItem(key) || '[]')
+        const updated = current.map((t) => {
+          if (taskIds.includes(t.id)) {
+            return {
+              ...t,
+              assignedToId: employeeId,
+              assignedTo: employeeObj || null,
+              updatedAt: new Date().toISOString(),
+            }
+          }
+          return t
+        })
+        localStorage.setItem(key, JSON.stringify(updated))
+      }
+      return { success: true, count: taskIds.length }
+    },
+
+    async punchIn(taskId: string, projectId: string, taskTitle?: string): Promise<TaskPunch> {
+      let punch: TaskPunch | null = null
+      try {
+        const res = await apiRequest<TaskPunch>(`/tasks/${taskId}/punches/start`, { method: 'POST' })
+        punch = res.data
+      } catch {}
+
+      if (!punch) {
+        let empId = 'current'
+        let empName = 'Employee'
+        if (typeof window !== 'undefined') {
+          const userStr = localStorage.getItem('crm_active_user')
+          if (userStr) {
+            const u = JSON.parse(userStr)
+            empId = u.id || empId
+            empName = u.fullName || empName
+          }
+        }
+        punch = {
+          id: `punch-${Date.now()}`,
+          taskId,
+          projectId,
+          taskTitle: taskTitle || 'Task',
+          employeeId: empId,
+          employeeName: empName,
+          startTime: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+        }
+      }
+      return punch
+    },
+
+    async punchOut(punchId: string, taskId: string, projectId: string, payload: PunchOutPayload, durationSeconds: number): Promise<TaskPunch> {
+      let punch: TaskPunch | null = null
+      try {
+        const res = await apiRequest<TaskPunch>(`/tasks/${taskId}/punches/${punchId}/stop`, {
+          method: 'POST',
+          body: JSON.stringify({ ...payload, durationSeconds }),
+        })
+        punch = res.data
+      } catch {}
+
+      const endTime = new Date().toISOString()
+      const finishedPunch: TaskPunch = punch || {
+        id: punchId,
+        taskId,
+        projectId,
+        employeeId: 'current',
+        startTime: new Date(Date.now() - durationSeconds * 1000).toISOString(),
+        endTime,
+        durationSeconds,
+        statusAtStop: payload.statusAtStop,
+        notes: payload.notes,
+        createdAt: endTime,
+      }
+
+      if (typeof window !== 'undefined') {
+        const pKey = `crm_punches_${taskId}`
+        const punches: TaskPunch[] = JSON.parse(localStorage.getItem(pKey) || '[]')
+        localStorage.setItem(pKey, JSON.stringify([finishedPunch, ...punches]))
+
+        const tKey = `crm_tasks_${projectId}`
+        const currentTasks: ProjectTask[] = JSON.parse(localStorage.getItem(tKey) || '[]')
+        const idx = currentTasks.findIndex((t) => t.id === taskId)
+        if (idx !== -1) {
+          const addedMinutes = Math.round(durationSeconds / 60)
+          currentTasks[idx].totalLoggedMinutes = (currentTasks[idx].totalLoggedMinutes || 0) + addedMinutes
+          currentTasks[idx].totalPunchesCount = (currentTasks[idx].totalPunchesCount || 0) + 1
+          currentTasks[idx].status = payload.statusAtStop
+          currentTasks[idx].updatedAt = endTime
+          localStorage.setItem(tKey, JSON.stringify(currentTasks))
+        }
+      }
+
+      return finishedPunch
+    },
+
+    async getPunches(taskId: string): Promise<TaskPunch[]> {
+      try {
+        const res = await apiRequest<any>(`/tasks/${taskId}/punches`)
+        const list = extractList<TaskPunch>(res.data, 'punches')
+        if (list && list.length > 0) return list
+      } catch {}
+      if (typeof window !== 'undefined') {
+        const stored = localStorage.getItem(`crm_punches_${taskId}`)
+        if (stored) {
+          try {
+            return JSON.parse(stored)
+          } catch {}
+        }
+      }
+      return []
+    },
+  },
+
+  // ── Daily Shift Attendance ──
+  attendance: {
+    async getStatus(): Promise<{ isClockedIn: boolean; currentRecord: AttendanceRecord | null }> {
+      try {
+        const res = await apiRequest<{ isClockedIn: boolean; currentRecord: AttendanceRecord | null }>('/attendance/status')
+        if (res.data) return res.data
+      } catch {}
+      if (typeof window !== 'undefined') {
+        const stored = localStorage.getItem('crm_active_shift')
+        if (stored) {
+          try {
+            const rec: AttendanceRecord = JSON.parse(stored)
+            if (rec && rec.status === 'clocked_in') {
+              return { isClockedIn: true, currentRecord: rec }
+            }
+          } catch {}
+        }
+      }
+      return { isClockedIn: false, currentRecord: null }
+    },
+
+    async clockIn(): Promise<AttendanceRecord> {
+      let rec: AttendanceRecord | null = null
+      try {
+        const res = await apiRequest<AttendanceRecord>('/attendance/clock-in', { method: 'POST' })
+        rec = res.data
+      } catch {}
+
+      if (!rec) {
+        let empId = 'current'
+        let empName = 'Employee'
+        if (typeof window !== 'undefined') {
+          const userStr = localStorage.getItem('crm_active_user')
+          if (userStr) {
+            const u = JSON.parse(userStr)
+            empId = u.id || empId
+            empName = u.fullName || empName
+          }
+        }
+        const now = new Date()
+        rec = {
+          id: `att-${Date.now()}`,
+          employeeId: empId,
+          employeeName: empName,
+          clockInTime: now.toISOString(),
+          date: now.toISOString().split('T')[0],
+          status: 'clocked_in',
+          createdAt: now.toISOString(),
+        }
+      }
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('crm_active_shift', JSON.stringify(rec))
+        const history: AttendanceRecord[] = JSON.parse(localStorage.getItem('crm_shift_history') || '[]')
+        localStorage.setItem('crm_shift_history', JSON.stringify([rec, ...history]))
+      }
+      return rec
+    },
+
+    async clockOut(): Promise<AttendanceRecord> {
+      let rec: AttendanceRecord | null = null
+      try {
+        const res = await apiRequest<AttendanceRecord>('/attendance/clock-out', { method: 'POST' })
+        rec = res.data
+      } catch {}
+
+      const now = new Date()
+      if (typeof window !== 'undefined') {
+        const stored = localStorage.getItem('crm_active_shift')
+        if (stored) {
+          const current: AttendanceRecord = JSON.parse(stored)
+          const startTime = new Date(current.clockInTime).getTime()
+          const durationMinutes = Math.max(1, Math.round((now.getTime() - startTime) / (1000 * 60)))
+          rec = {
+            ...current,
+            clockOutTime: now.toISOString(),
+            durationMinutes,
+            status: 'clocked_out',
+          }
+          localStorage.removeItem('crm_active_shift')
+          const history: AttendanceRecord[] = JSON.parse(localStorage.getItem('crm_shift_history') || '[]')
+          const updatedHistory = history.map((h) => (h.id === rec!.id ? rec! : h))
+          localStorage.setItem('crm_shift_history', JSON.stringify(updatedHistory))
+        }
+      }
+
+      return rec || {
+        id: `att-${Date.now()}`,
+        employeeId: 'current',
+        clockInTime: now.toISOString(),
+        clockOutTime: now.toISOString(),
+        durationMinutes: 0,
+        date: now.toISOString().split('T')[0],
+        status: 'clocked_out',
+        createdAt: now.toISOString(),
+      }
+    },
+
+    async getHistory(): Promise<AttendanceRecord[]> {
+      try {
+        const res = await apiRequest<any>('/attendance/history')
+        const list = extractList<AttendanceRecord>(res.data, 'attendance')
+        if (list && list.length > 0) return list
+      } catch {}
+      if (typeof window !== 'undefined') {
+        const stored = localStorage.getItem('crm_shift_history')
+        if (stored) {
+          try {
+            return JSON.parse(stored)
+          } catch {}
+        }
+      }
+      return []
     },
   },
 }

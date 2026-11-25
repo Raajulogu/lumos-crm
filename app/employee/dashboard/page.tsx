@@ -18,7 +18,7 @@ import {
   EmptyState,
 } from '@/components/ui'
 import { api } from '@/lib/api'
-import type { Project, Client, Doubt, FollowUp } from '@/lib/types'
+import type { Project, Client, Doubt, FollowUp, ProjectTask } from '@/lib/types'
 import {
   Briefcase,
   AlertTriangle,
@@ -29,8 +29,12 @@ import {
   AlertCircle,
   CheckCircle2,
   Clock,
+  Play,
+  Square,
+  ListTodo,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
+import { useTaskTimer } from '@/lib/task-timer-context'
 import {
   formatDate,
   getStatusLabel,
@@ -51,10 +55,12 @@ export default function EmployeeDashboardPage() {
 
 function EmployeeDashboardContent() {
   const { currentUser } = useAuth()
+  const { activePunch, elapsedSeconds, openStopModal, startTaskTimer } = useTaskTimer()
 
   const [projects, setProjects] = useState<Project[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [followups, setFollowups] = useState<FollowUp[]>([])
+  const [myTasks, setMyTasks] = useState<ProjectTask[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -67,8 +73,9 @@ function EmployeeDashboardContent() {
       api.projects.list({ limit: 100 }),
       api.clients.list({ limit: 100 }).catch(() => ({ clients: [] })),
       api.followups.list({ limit: 50 }),
+      api.tasks.listMyAssigned(),
     ])
-      .then(([projRes, clientRes, fuRes]) => {
+      .then(([projRes, clientRes, fuRes, taskRes]) => {
         if (!mounted) return
 
         if (projRes.status === 'fulfilled') {
@@ -84,6 +91,10 @@ function EmployeeDashboardContent() {
         if (fuRes.status === 'fulfilled') {
           setFollowups(fuRes.value?.followups || [])
         }
+
+        if (taskRes.status === 'fulfilled') {
+          setMyTasks(taskRes.value || [])
+        }
       })
       .finally(() => {
         if (mounted) setLoading(false)
@@ -91,6 +102,19 @@ function EmployeeDashboardContent() {
 
     return () => {
       mounted = false
+    }
+  }, [])
+
+  // Listen for timer events to refresh tasks list
+  useEffect(() => {
+    const handlePunchEvent = () => {
+      api.tasks.listMyAssigned().then((tasks) => setMyTasks(tasks)).catch(() => {})
+    }
+    window.addEventListener('crm_punch_stopped', handlePunchEvent)
+    window.addEventListener('crm_punch_started', handlePunchEvent)
+    return () => {
+      window.removeEventListener('crm_punch_stopped', handlePunchEvent)
+      window.removeEventListener('crm_punch_started', handlePunchEvent)
     }
   }, [])
 
@@ -196,6 +220,44 @@ function EmployeeDashboardContent() {
         </div>
       )}
 
+      {/* Live Work Session Banner (if timer is active) */}
+      {activePunch && (
+        <div className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-emerald-500/15 via-emerald-500/5 to-transparent border border-emerald-300 flex items-center justify-between flex-wrap gap-3 shadow-xs">
+          <div className="flex items-center gap-3">
+            <span className="relative flex h-3 w-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+            </span>
+            <div>
+              <p className="text-xs font-bold text-emerald-950">
+                Work Session Active: <span className="underline">{activePunch.taskTitle}</span>
+              </p>
+              <p className="text-[11px] text-emerald-800">
+                {activePunch.projectName ? `Project: ${activePunch.projectName} • ` : ''}
+                Recorded duration is being logged to your work timesheet.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <span className="font-mono text-sm font-bold text-emerald-950 bg-white px-3 py-1 rounded-lg border border-emerald-300 shadow-xs">
+              {Math.floor(elapsedSeconds / 3600).toString().padStart(2, '0')}:
+              {Math.floor((elapsedSeconds % 3600) / 60).toString().padStart(2, '0')}:
+              {(elapsedSeconds % 60).toString().padStart(2, '0')}
+            </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={openStopModal}
+              className="bg-white border-emerald-300 text-rose-700 hover:bg-rose-50"
+            >
+              <Square className="h-3.5 w-3.5 fill-current" />
+              <span>Stop & Log Session</span>
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Top Stat Cards */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 mb-6">
         {loading
@@ -217,8 +279,97 @@ function EmployeeDashboardContent() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
-        {/* Active Projects List — Takes 2 cols on desktop */}
-        <div className="lg:col-span-2">
+        {/* Active Tasks & Projects List — Takes 2 cols on desktop */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Actionable Tasks & Punch Timers */}
+          <Card padding="md">
+            <CardHeader
+              title="My Actionable Tasks"
+              description="Direct deliverables delegated to you across active projects"
+            />
+
+            {loading ? (
+              <TableSkeleton rows={3} cols={3} />
+            ) : myTasks.length === 0 ? (
+              <div className="py-8 text-center text-xs text-text-muted">
+                <ListTodo className="h-8 w-8 text-slate-300 mx-auto mb-1.5" />
+                <p className="font-semibold text-text-primary">0 Actionable Tasks</p>
+                <p className="mt-0.5">You have no pending sub-tasks assigned. Review your project workspaces below.</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-border">
+                {myTasks.slice(0, 5).map((task) => {
+                  const isTaskActive = activePunch?.taskId === task.id
+                  const proj = projects.find((p) => p.id === task.projectId)
+
+                  return (
+                    <div
+                      key={task.id}
+                      className="py-3 first:pt-0 last:pb-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold text-sm text-text-primary truncate">
+                            {task.title}
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
+                              task.status === 'completed'
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                : task.status === 'in_progress'
+                                ? 'bg-blue-50 text-blue-800 border-blue-200'
+                                : 'bg-slate-100 text-slate-700 border-slate-200'
+                            }`}
+                          >
+                            {task.status.replace('_', ' ')}
+                          </span>
+                        </div>
+                        <p className="text-xs text-text-muted mt-0.5">
+                          Project: {proj?.name || task.projectName || 'Campaign Workspace'} • Logged: {task.totalLoggedMinutes || 0}m
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 self-end sm:self-center">
+                        {isTaskActive ? (
+                          <button
+                            type="button"
+                            onClick={openStopModal}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-rose-600 text-white font-semibold text-xs transition-colors cursor-pointer"
+                          >
+                            <Square className="h-3.5 w-3.5 fill-current" />
+                            <span>Stop Timer</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              startTaskTimer({
+                                id: task.id,
+                                title: task.title,
+                                projectId: task.projectId,
+                                projectName: proj?.name || task.projectName,
+                              })
+                            }
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-semibold text-xs transition-colors cursor-pointer"
+                          >
+                            <Play className="h-3.5 w-3.5 fill-current" />
+                            <span>Start Work Timer</span>
+                          </button>
+                        )}
+
+                        <Link href={`/employee/projects/${task.projectId}`}>
+                          <Button variant="ghost" size="sm">
+                            Workspace
+                          </Button>
+                        </Link>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </Card>
+
           <Card padding="md">
             <CardHeader
               title="Assigned Projects"

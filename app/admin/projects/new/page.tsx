@@ -73,6 +73,20 @@ function NewProjectForm() {
   const [primaryEmployeeId, setPrimaryEmployeeId] = useState('')
   const [additionalMemberIds, setAdditionalMemberIds] = useState<string[]>([])
 
+  // Initial Project Tasks setup
+  const [initialTasks, setInitialTasks] = useState<string[]>([])
+  const [taskInput, setTaskInput] = useState('')
+
+  function addInitialTask() {
+    if (!taskInput.trim()) return
+    setInitialTasks((prev) => [...prev, taskInput.trim()])
+    setTaskInput('')
+  }
+
+  function removeInitialTask(idx: number) {
+    setInitialTasks((prev) => prev.filter((_, i) => i !== idx))
+  }
+
   // Custom Reminders (days before deadline)
   const [reminderDays, setReminderDays] = useState<number[]>([3, 2, 1, 0])
   const [newReminderDay, setNewReminderDay] = useState('')
@@ -160,6 +174,21 @@ function NewProjectForm() {
       })
 
       const projId = created?.id || 'new'
+
+      // Pre-seed any initial tasks defined during project creation
+      if (initialTasks.length > 0 && projId !== 'new') {
+        for (const t of initialTasks) {
+          try {
+            await api.tasks.create(projId, {
+              title: t,
+              assignedToId: primaryEmployeeId || undefined,
+              priority,
+              dueDate: deliveryDate ? new Date(deliveryDate).toISOString() : undefined,
+            })
+          } catch {}
+        }
+      }
+
       router.push(`/admin/projects/${projId}`)
     } catch (err: any) {
       setServerError(err?.message || 'Failed to create project on backend server.')
@@ -446,7 +475,65 @@ function NewProjectForm() {
             </div>
           </div>
 
-          {/* Section 5: Automated Deadline Reminder Triggers */}
+          {/* Section 5: Initial Project Tasks */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between border-b border-border pb-2">
+              <h3 className="text-sm font-semibold text-text-primary">
+                Initial Project Tasks & Deliverables <span className="text-text-muted font-normal text-xs">(optional)</span>
+              </h3>
+              <span className="text-xs text-text-muted">
+                {initialTasks.length} {initialTasks.length === 1 ? 'task' : 'tasks'} added
+              </span>
+            </div>
+
+            <p className="text-xs text-text-muted">
+              You can define specific tasks now, or add and delegate granular tasks later inside the project workspace.
+            </p>
+
+            <div className="flex gap-2">
+              <Input
+                placeholder="e.g. Conduct Competitor Analysis, Write 5 Product Descriptions, Build Wireframes"
+                value={taskInput}
+                onChange={(e) => setTaskInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    addInitialTask()
+                  }
+                }}
+                className="flex-1"
+              />
+              <Button type="button" variant="secondary" onClick={addInitialTask}>
+                <Plus className="h-4 w-4" />
+                <span>Add Task</span>
+              </Button>
+            </div>
+
+            {initialTasks.length > 0 && (
+              <div className="space-y-2 mt-2">
+                {initialTasks.map((t, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-center justify-between p-2.5 rounded-lg bg-surface border border-border text-xs"
+                  >
+                    <span className="font-medium text-text-primary">
+                      {idx + 1}. {t}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeInitialTask(idx)}
+                      className="text-text-muted hover:text-danger p-1"
+                      aria-label="Remove task"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Section 6: Automated Deadline Reminder Triggers */}
           <div className="space-y-4">
             <div className="flex items-center justify-between border-b border-border pb-2">
               <h3 className="text-sm font-semibold text-text-primary">

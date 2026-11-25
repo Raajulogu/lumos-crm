@@ -23,7 +23,18 @@ import {
 } from '@/components/ui'
 import { ProjectPipelineStepper } from '@/components/common'
 import { api } from '@/lib/api'
-import type { Project, Client, Doubt, Note, ServiceCategory, ProjectStatus, ProjectPriority, DoubtPriority } from '@/lib/types'
+import type {
+  Project,
+  Client,
+  Doubt,
+  Note,
+  ServiceCategory,
+  ProjectStatus,
+  ProjectPriority,
+  DoubtPriority,
+  ProjectTask,
+  TaskPunch,
+} from '@/lib/types'
 import {
   Briefcase,
   Building2,
@@ -38,6 +49,10 @@ import {
   HelpCircle,
   CheckCircle2,
   AlertCircle,
+  Play,
+  Square,
+  History,
+  ListTodo,
 } from 'lucide-react'
 import {
   formatDate,
@@ -51,6 +66,7 @@ import {
   generateId,
 } from '@/lib/utils'
 import { useAuth } from '@/lib/auth-context'
+import { useTaskTimer } from '@/lib/task-timer-context'
 
 export default function EmployeeProjectDetailPage() {
   return (
@@ -62,6 +78,7 @@ export default function EmployeeProjectDetailPage() {
 
 function EmployeeProjectDetailContent() {
   const { currentUser } = useAuth()
+  const { activePunch, startTaskTimer, openStopModal } = useTaskTimer()
   const params = useParams()
   const router = useRouter()
   const projectId = params?.id as string
@@ -71,7 +88,8 @@ function EmployeeProjectDetailContent() {
   const [loading, setLoading] = useState(true)
   const [project, setProject] = useState<Project | null>(null)
   const [categories, setCategories] = useState<ServiceCategory[]>([])
-  const [activeTab, setActiveTab] = useState('scope')
+  const [projectTasks, setProjectTasks] = useState<ProjectTask[]>([])
+  const [activeTab, setActiveTab] = useState('tasks')
 
   // Doubts state
   const [projectDoubts, setProjectDoubts] = useState<Doubt[]>([])
@@ -84,6 +102,12 @@ function EmployeeProjectDetailContent() {
   const [projectNotes, setProjectNotes] = useState<Note[]>([])
   const [newNote, setNewNote] = useState('')
 
+  // Punches history modal
+  const [isPunchesModalOpen, setIsPunchesModalOpen] = useState(false)
+  const [selectedTaskForPunches, setSelectedTaskForPunches] = useState<ProjectTask | null>(null)
+  const [taskPunchesList, setTaskPunchesList] = useState<TaskPunch[]>([])
+  const [loadingPunches, setLoadingPunches] = useState(false)
+
   useEffect(() => {
     let mounted = true
     setLoading(true)
@@ -93,8 +117,9 @@ function EmployeeProjectDetailContent() {
       api.settings.getCategories(),
       api.doubts.listByProject(projectId),
       api.notes.listByProject(projectId),
+      api.tasks.listByProject(projectId),
     ])
-      .then(([projRes, catRes, doubtRes, noteRes]) => {
+      .then(([projRes, catRes, doubtRes, noteRes, taskRes]) => {
         if (!mounted) return
 
         if (projRes.status === 'fulfilled' && projRes.value) {
@@ -104,6 +129,7 @@ function EmployeeProjectDetailContent() {
         if (catRes.status === 'fulfilled') setCategories(catRes.value || [])
         if (doubtRes.status === 'fulfilled') setProjectDoubts(doubtRes.value || [])
         if (noteRes.status === 'fulfilled') setProjectNotes(noteRes.value || [])
+        if (taskRes.status === 'fulfilled') setProjectTasks(taskRes.value || [])
       })
       .finally(() => {
         if (mounted) setLoading(false)
@@ -113,6 +139,31 @@ function EmployeeProjectDetailContent() {
       mounted = false
     }
   }, [projectId])
+
+  // Listen for punch events to refresh tasks list
+  useEffect(() => {
+    const handlePunchEvent = () => {
+      api.tasks.listByProject(projectId).then((tasks) => setProjectTasks(tasks)).catch(() => {})
+    }
+    window.addEventListener('crm_punch_stopped', handlePunchEvent)
+    window.addEventListener('crm_punch_started', handlePunchEvent)
+    return () => {
+      window.removeEventListener('crm_punch_stopped', handlePunchEvent)
+      window.removeEventListener('crm_punch_started', handlePunchEvent)
+    }
+  }, [projectId])
+
+  async function handleOpenPunches(task: ProjectTask) {
+    setSelectedTaskForPunches(task)
+    setIsPunchesModalOpen(true)
+    setLoadingPunches(true)
+    try {
+      const list = await api.tasks.getPunches(task.id)
+      setTaskPunchesList(list)
+    } finally {
+      setLoadingPunches(false)
+    }
+  }
 
   const categoryMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
 
@@ -230,7 +281,14 @@ function EmployeeProjectDetailContent() {
     ? projectDoubts.filter((d) => d && d.status === 'open').length
     : 0
 
+  const myTasks = useMemo(() => {
+    return projectTasks.filter(
+      (t) => !t.assignedToId || t.assignedToId === currentEmpId || currentUser.role === 'admin',
+    )
+  }, [projectTasks, currentEmpId, currentUser.role])
+
   const tabs = [
+    { id: 'tasks', label: 'My Assigned Tasks', count: myTasks.length },
     { id: 'scope', label: 'Scope & Guidelines' },
     { id: 'doubts', label: 'My Doubts & Questions', count: myDoubtsCount },
     { id: 'notes', label: 'Deliverable Notes', count: Array.isArray(projectNotes) ? projectNotes.length : 0 },
@@ -346,7 +404,165 @@ function EmployeeProjectDetailContent() {
         <Tabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} />
       </div>
 
-      {/* Tab 1: Scope & Guidelines */}
+      {/* Tab: Assigned Deliverable Tasks & Work Timer */}
+      {activeTab === 'tasks' && (
+        <div className="space-y-4">
+          <Card padding="md">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+              <div>
+                <h3 className="text-sm font-bold text-text-primary">
+                  My Assigned Tasks & Work Punch Timers
+                </h3>
+                <p className="text-xs text-text-muted mt-0.5">
+                  Click &apos;Start Work Timer&apos; when you begin execution. Your live timer will track progress in the top bar.
+                </p>
+              </div>
+
+              {activePunch && activePunch.projectId === project.id && (
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-300 text-xs">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="font-semibold text-emerald-950">Active on: {activePunch.taskTitle}</span>
+                  <button
+                    type="button"
+                    onClick={openStopModal}
+                    className="ml-1 text-[11px] font-bold text-rose-700 hover:text-rose-900 underline cursor-pointer"
+                  >
+                    Stop Work Timer
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {myTasks.length === 0 ? (
+              <div className="py-12 text-center text-xs text-text-muted border border-dashed border-border rounded-xl">
+                <ListTodo className="h-8 w-8 text-slate-300 mx-auto mb-2" />
+                <p className="font-semibold text-text-primary text-sm">No Specific Tasks Assigned</p>
+                <p className="mt-1 max-w-sm mx-auto">
+                  There are no sub-tasks assigned to you yet for this project. Check the Scope & Guidelines tab for campaign deliverables.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {myTasks.map((task) => {
+                  const isTaskActive = activePunch?.taskId === task.id
+                  const isTaskLate = task.dueDate ? new Date(task.dueDate) < new Date() && task.status !== 'completed' : false
+
+                  return (
+                    <div
+                      key={task.id}
+                      className={`p-4 rounded-xl border transition-all ${
+                        isTaskActive
+                          ? 'border-emerald-500 bg-emerald-50/40 ring-1 ring-emerald-500 shadow-sm'
+                          : 'border-border bg-white hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <div className="min-w-0">
+                          <h4 className="font-bold text-sm text-text-primary truncate">
+                            {task.title}
+                          </h4>
+                          {task.description && (
+                            <p className="text-xs text-text-secondary mt-1 line-clamp-2">
+                              {task.description}
+                            </p>
+                          )}
+                        </div>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border flex-shrink-0 ${
+                            task.status === 'completed'
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                              : task.status === 'review'
+                              ? 'bg-purple-50 text-purple-800 border-purple-200'
+                              : task.status === 'in_progress'
+                              ? 'bg-blue-50 text-blue-800 border-blue-200'
+                              : task.status === 'blocked'
+                              ? 'bg-rose-50 text-rose-800 border-rose-200'
+                              : 'bg-slate-100 text-slate-700 border-slate-200'
+                          }`}
+                        >
+                          {task.status === 'completed'
+                            ? 'Completed'
+                            : task.status === 'review'
+                            ? 'Review'
+                            : task.status === 'in_progress'
+                            ? 'In Progress'
+                            : task.status === 'blocked'
+                            ? 'Blocked'
+                            : 'To Do'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2 mb-3 text-xs text-text-muted">
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${getPriorityColor(
+                            task.priority,
+                          )}`}
+                        >
+                          {getPriorityLabel(task.priority)}
+                        </span>
+
+                        {task.dueDate && (
+                          <span
+                            suppressHydrationWarning
+                            className={isTaskLate ? 'text-danger font-semibold' : ''}
+                          >
+                            Due: {formatDate(task.dueDate)}
+                          </span>
+                        )}
+
+                        <span>•</span>
+                        <span className="font-mono text-brand-700 font-medium">
+                          {task.totalLoggedMinutes || 0}m logged
+                        </span>
+                      </div>
+
+                      <div className="pt-3 border-t border-border flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenPunches(task)}
+                          className="flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
+                        >
+                          <History className="h-3.5 w-3.5 text-text-muted" />
+                          <span>Punch Logs ({task.totalPunchesCount || 0})</span>
+                        </button>
+
+                        {isTaskActive ? (
+                          <button
+                            type="button"
+                            onClick={openStopModal}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-rose-600 text-white font-semibold text-xs transition-colors cursor-pointer shadow-xs"
+                          >
+                            <Square className="h-3.5 w-3.5 fill-current" />
+                            <span>Stop Timer</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              startTaskTimer({
+                                id: task.id,
+                                title: task.title,
+                                projectId: project.id,
+                                projectName: project.name,
+                              })
+                            }
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-semibold text-xs transition-colors cursor-pointer shadow-xs"
+                          >
+                            <Play className="h-3.5 w-3.5 fill-current" />
+                            <span>Start Work Timer</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {/* Tab 2: Scope & Guidelines */}
       {activeTab === 'scope' && (
         <Card padding="lg" className="space-y-6">
           <CardHeader
@@ -573,6 +789,92 @@ function EmployeeProjectDetailContent() {
             rows={4}
             required
           />
+        </div>
+      </Modal>
+
+      {/* View Task Punches / Work History Modal */}
+      <Modal
+        isOpen={isPunchesModalOpen}
+        onClose={() => setIsPunchesModalOpen(false)}
+        title="My Task Work Time Logs"
+        description={selectedTaskForPunches ? `Audit log for: ${selectedTaskForPunches.title}` : ''}
+        size="lg"
+      >
+        <div className="space-y-4">
+          {selectedTaskForPunches && (
+            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div>
+                <p className="text-text-muted">Total Recorded Time:</p>
+                <p className="font-bold text-base text-brand-700 mt-0.5 font-mono">
+                  {selectedTaskForPunches.totalLoggedMinutes || 0} minutes
+                </p>
+              </div>
+              <div>
+                <p className="text-text-muted">Total Punch Sessions:</p>
+                <p className="font-semibold text-text-primary mt-0.5">
+                  {taskPunchesList.length} sessions
+                </p>
+              </div>
+            </div>
+          )}
+
+          {loadingPunches ? (
+            <div className="py-8 text-center text-xs text-text-muted">Loading punch records...</div>
+          ) : taskPunchesList.length === 0 ? (
+            <div className="py-8 text-center text-xs text-text-muted border border-dashed border-border rounded-xl">
+              <Clock className="h-6 w-6 text-slate-300 mx-auto mb-1.5" />
+              <p className="font-medium text-text-primary">No Punches Logged Yet</p>
+              <p className="mt-0.5">When you start and stop the work timer, each individual session will be logged here.</p>
+            </div>
+          ) : (
+            <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
+              {taskPunchesList.map((punch, idx) => {
+                const durationMins = Math.round((punch.durationSeconds || 0) / 60)
+                return (
+                  <div key={punch.id || idx} className="p-3 rounded-xl border border-border bg-white text-xs space-y-1.5 hover:border-slate-300 transition-colors">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {punch.statusAtStop && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-brand-50 text-brand-800 border border-brand-200 capitalize">
+                            Status: {punch.statusAtStop.replace('_', ' ')}
+                          </span>
+                        )}
+                      </div>
+                      <span className="font-mono font-bold text-brand-700 bg-brand-50 px-2 py-0.5 rounded border border-brand-200">
+                        {durationMins > 0 ? `${durationMins} mins` : `${punch.durationSeconds || 0}s`}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-text-muted text-[11px]">
+                      <span>Started: {formatDateTime(punch.startTime)}</span>
+                      {punch.endTime && (
+                        <>
+                          <span>•</span>
+                          <span>Stopped: {formatDateTime(punch.endTime)}</span>
+                        </>
+                      )}
+                    </div>
+
+                    {punch.notes && (
+                      <p className="text-text-secondary bg-slate-50 p-2 rounded-lg border border-slate-100 mt-1">
+                        <strong>My Work Note:</strong> {punch.notes}
+                      </p>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          <div className="pt-2 flex justify-end">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setIsPunchesModalOpen(false)}
+            >
+              Close
+            </Button>
+          </div>
         </div>
       </Modal>
     </ContentWrapper>

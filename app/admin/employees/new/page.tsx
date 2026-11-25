@@ -242,13 +242,13 @@ export default function NewEmployeePage() {
             </div>
 
             <p className="text-xs text-text-muted">
-              Enter the initial password for this staff member. They will be prompted to verify and reset their password upon first logging in.
+              Enter the initial password for this staff member. Administrators alone decide and manage employee passwords; staff members cannot self-change credentials.
             </p>
 
             <Input
-              label="Temporary / Initial Password"
+              label="Employee Login Password"
               type="text"
-              placeholder="Generate or enter a strong password"
+              placeholder="Set a secure password (min 6 characters)"
               value={initialPassword}
               onChange={(e) => setInitialPassword(e.target.value)}
               error={errors.initialPassword}

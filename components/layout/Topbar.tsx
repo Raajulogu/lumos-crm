@@ -16,11 +16,14 @@ import {
   Shield,
   Settings,
   Briefcase,
+  Square,
+  Clock,
 } from 'lucide-react'
 import { Button, Avatar, Badge } from '@/components/ui'
 import { cn } from '@/lib/utils'
 import { api } from '@/lib/api'
 import { useAuth } from '@/lib/auth-context'
+import { useTaskTimer } from '@/lib/task-timer-context'
 
 interface TopbarProps {
   onMenuClick: () => void // opens mobile sidebar
@@ -39,9 +42,17 @@ export function Topbar({
 }: TopbarProps) {
   const router = useRouter()
   const { currentUser, logout } = useAuth()
+  const { activePunch, elapsedSeconds, openStopModal } = useTaskTimer()
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
   const menuRef = useRef<HTMLDivElement>(null)
+
+  function formatDuration(totalSec: number) {
+    const hrs = Math.floor(totalSec / 3600)
+    const mins = Math.floor((totalSec % 3600) / 60)
+    const secs = totalSec % 60
+    return `${hrs > 0 ? `${hrs.toString().padStart(2, '0')}:` : ''}${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+  }
 
   const activeName = propUserName || currentUser.fullName || 'User'
   const activeEmail = currentUser.email || ''
@@ -117,7 +128,40 @@ export function Topbar({
       <div className="flex-1" />
 
       {/* Right side actions */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 sm:gap-3">
+        {/* Active Work Task Punch Timer (Top Right Corner) */}
+        {activePunch && (
+          <div className="flex items-center gap-2 px-2.5 sm:px-3 py-1 rounded-full bg-emerald-50 border border-emerald-300 text-xs shadow-xs animate-in fade-in">
+            <span className="relative flex h-2 w-2 flex-shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+
+            <div className="hidden lg:flex flex-col text-left max-w-[130px] xl:max-w-[170px]">
+              <span className="font-semibold text-emerald-950 truncate text-[11px] leading-tight" title={activePunch.taskTitle}>
+                {activePunch.taskTitle}
+              </span>
+              <span className="text-[10px] text-emerald-700">
+                Task Work Timer
+              </span>
+            </div>
+
+            <span className="font-mono font-bold text-emerald-900 bg-emerald-100/90 px-2 py-0.5 rounded text-xs">
+              {formatDuration(elapsedSeconds)}
+            </span>
+
+            <button
+              type="button"
+              onClick={openStopModal}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-600 hover:bg-rose-600 text-white font-medium text-[11px] transition-colors cursor-pointer shadow-xs"
+              title="Stop work timer & log session"
+            >
+              <Square className="h-2.5 w-2.5 fill-current" />
+              <span className="hidden sm:inline">Stop</span>
+            </button>
+          </div>
+        )}
+
         {/* Notification bell */}
         <div className="relative">
           <Button

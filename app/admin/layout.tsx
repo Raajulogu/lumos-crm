@@ -64,7 +64,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <Topbar
           onMenuClick={open}
-          userName={currentUser.role === 'admin' ? currentUser.fullName : 'Rajesh Sharma'}
+          userName={currentUser.fullName || 'Agency Admin'}
           userRole="admin"
           onNotificationClick={() => setNotifOpen(true)}
         />

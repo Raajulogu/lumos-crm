@@ -61,7 +61,7 @@ export default function EmployeeLayout({ children }: EmployeeLayoutProps) {
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <Topbar
           onMenuClick={open}
-          userName={currentUser.role === 'employee' ? currentUser.fullName : 'Priya Sharma'}
+          userName={currentUser.fullName || 'Team Member'}
           userRole="employee"
           onNotificationClick={() => setNotifOpen(true)}
         />

@@ -15,6 +15,8 @@ import {
   Button,
   Avatar,
   Toggle,
+  Input,
+  Modal,
   PageLoader,
   CardSkeleton,
   TableSkeleton,
@@ -36,6 +38,11 @@ import {
   TrendingUp,
   Award,
   AlertCircle,
+  Lock,
+  Eye,
+  EyeOff,
+  ShieldCheck,
+  Check,
 } from 'lucide-react'
 import {
   formatDate,
@@ -65,6 +72,40 @@ function AdminEmployeeDetailContent() {
   const [projects, setProjects] = useState<Project[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [doubts, setDoubts] = useState<Doubt[]>([])
+
+  // Password management state (Admin control)
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false)
+  const [newPassword, setNewPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false)
+  const [passwordSuccess, setPasswordSuccess] = useState('')
+  const [passwordError, setPasswordError] = useState('')
+
+  async function handleUpdatePassword(e: React.FormEvent) {
+    e.preventDefault()
+    setPasswordError('')
+    setPasswordSuccess('')
+
+    if (!newPassword || newPassword.length < 6) {
+      setPasswordError('Password must be at least 6 characters long.')
+      return
+    }
+
+    setIsUpdatingPassword(true)
+    try {
+      await api.employees.updatePassword(empId, newPassword)
+      setPasswordSuccess('Password successfully updated for this team member.')
+      setNewPassword('')
+      setTimeout(() => {
+        setIsPasswordModalOpen(false)
+        setPasswordSuccess('')
+      }, 1500)
+    } catch (err: any) {
+      setPasswordError(err?.message || 'Failed to update employee password.')
+    } finally {
+      setIsUpdatingPassword(false)
+    }
+  }
 
   useEffect(() => {
     let mounted = true
@@ -431,8 +472,110 @@ function AdminEmployeeDetailContent() {
               )}
             </div>
           </Card>
+
+          {/* Credentials & Access Security (Admin Exclusive Control) */}
+          <Card padding="md">
+            <CardHeader
+              title="Credentials & Security"
+              description="Admin-managed account credentials"
+            />
+
+            <div className="space-y-3 text-xs">
+              <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200/80 text-amber-900 flex items-start gap-2">
+                <ShieldCheck className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                <p className="leading-relaxed">
+                  Administrators decide and manage employee passwords. Staff members cannot self-change login credentials.
+                </p>
+              </div>
+
+              <Button
+                variant="secondary"
+                size="sm"
+                className="w-full flex items-center justify-center gap-2 font-medium"
+                onClick={() => {
+                  setPasswordError('')
+                  setPasswordSuccess('')
+                  setNewPassword('')
+                  setIsPasswordModalOpen(true)
+                }}
+              >
+                <Lock className="h-3.5 w-3.5" />
+                <span>Reset Staff Password</span>
+              </Button>
+            </div>
+          </Card>
         </div>
       </div>
+
+      {/* Change Password Modal */}
+      <Modal
+        isOpen={isPasswordModalOpen}
+        onClose={() => setIsPasswordModalOpen(false)}
+        title={`Change Password for ${employee.fullName}`}
+        description="Set a new login password for this employee account"
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setIsPasswordModalOpen(false)}
+              disabled={isUpdatingPassword}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleUpdatePassword}
+              isLoading={isUpdatingPassword}
+            >
+              Save New Password
+            </Button>
+          </>
+        }
+      >
+        <form onSubmit={handleUpdatePassword} className="space-y-4">
+          {passwordSuccess && (
+            <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-2">
+              <Check className="h-4 w-4 text-emerald-600" />
+              <span>{passwordSuccess}</span>
+            </div>
+          )}
+
+          {passwordError && (
+            <div className="p-3 rounded-lg bg-danger-light border border-danger/30 text-danger-dark text-xs font-medium flex items-center gap-2">
+              <AlertCircle className="h-4 w-4" />
+              <span>{passwordError}</span>
+            </div>
+          )}
+
+          <div>
+            <label className="text-xs font-semibold text-text-primary block mb-1.5">
+              New Password (minimum 6 characters)
+            </label>
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                placeholder="Enter new password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                required
+                className="w-full h-10 rounded-lg border border-border bg-white pl-3 pr-10 text-xs text-text-primary focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute inset-y-0 right-0 pr-3 flex items-center text-text-muted hover:text-text-secondary cursor-pointer"
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+            <p className="text-[11px] text-text-muted mt-1.5">
+              Provide this updated password to the team member so they can sign in.
+            </p>
+          </div>
+        </form>
+      </Modal>
     </ContentWrapper>
   )
 }

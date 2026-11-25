@@ -268,3 +268,91 @@ export interface CreateEmployeePayload {
   notes?: string
 }
 
+// ─── Project Tasks & Task Punches ─────────────────────────────
+
+export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'completed' | 'blocked'
+export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent'
+
+export interface ProjectTask {
+  id: string
+  projectId: string
+  projectName?: string
+  title: string
+  description?: string
+  assignedToId?: string | null
+  assignedTo?: {
+    id: string
+    fullName: string
+    email?: string
+    designation?: string
+  } | null
+  status: TaskStatus
+  priority: TaskPriority
+  dueDate?: string
+  estimatedHours?: number
+  totalLoggedMinutes?: number
+  totalPunchesCount?: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface TaskPunch {
+  id: string
+  taskId: string
+  taskTitle?: string
+  projectId: string
+  projectName?: string
+  employeeId: string
+  employeeName?: string
+  startTime: string // ISO string
+  endTime?: string  // ISO string (null while running)
+  durationSeconds?: number
+  statusAtStop?: TaskStatus
+  notes?: string
+  createdAt: string
+}
+
+export interface CreateTaskPayload {
+  title: string
+  description?: string
+  assignedToId?: string | null
+  priority?: TaskPriority
+  status?: TaskStatus
+  dueDate?: string
+  estimatedHours?: number
+}
+
+export interface UpdateTaskPayload {
+  title?: string
+  description?: string
+  assignedToId?: string | null
+  priority?: TaskPriority
+  status?: TaskStatus
+  dueDate?: string
+  estimatedHours?: number
+}
+
+export interface PunchOutPayload {
+  statusAtStop: TaskStatus
+  notes?: string
+}
+
+// ─── Daily Shift Attendance ───────────────────────────────────
+
+export interface AttendanceRecord {
+  id: string
+  employeeId: string
+  employeeName?: string
+  clockInTime: string
+  clockOutTime?: string
+  durationMinutes?: number
+  date: string // YYYY-MM-DD
+  status: 'clocked_in' | 'clocked_out'
+  createdAt: string
+}
+
+export interface UpdateEmployeePasswordPayload {
+  password: string
+}
+
+

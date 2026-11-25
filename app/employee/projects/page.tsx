@@ -29,6 +29,7 @@ import {
   AlertCircle,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
+import { useTaskTimer } from '@/lib/task-timer-context'
 import {
   formatDate,
   getStatusLabel,
@@ -49,6 +50,7 @@ export default function EmployeeProjectsPage() {
 
 function EmployeeProjectsContent() {
   const { currentUser } = useAuth()
+  const { activePunch } = useTaskTimer()
 
   const [projects, setProjects] = useState<Project[]>([])
   const [clients, setClients] = useState<Client[]>([])
@@ -321,6 +323,12 @@ function EmployeeProjectsContent() {
                             <span className="text-[11px] text-text-muted truncate block mt-0.5">
                               {client?.company || client?.companyName || (proj as any).clientName || 'Client'}
                             </span>
+                            {activePunch && (activePunch.projectId === projId || activePunch.projectId === proj.id) && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-300 mt-1">
+                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                Working: {activePunch.taskTitle}
+                              </span>
+                            )}
                           </td>
 
                           <td className="py-3.5 px-4">
