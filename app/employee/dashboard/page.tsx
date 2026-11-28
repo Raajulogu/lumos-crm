@@ -1,9 +1,9 @@
 'use client'
 
 // app/employee/dashboard/page.tsx
-// Employee Dashboard — Connected to live backend API with skeletons and 0-data screen.
+// Employee Dashboard — Actionable Tasks with Search, Real Project Names, Follow-up Evaluation, & AFFIXX Workspace Model.
 
-import { useState, useMemo, useEffect, Suspense } from 'react'
+import { useState, useMemo, useEffect, useCallback, Suspense } from 'react'
 import Link from 'next/link'
 import { ContentWrapper } from '@/components/layout/ContentWrapper'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -15,23 +15,28 @@ import {
   PageLoader,
   MetricCardSkeleton,
   TableSkeleton,
-  EmptyState,
 } from '@/components/ui'
+import {
+  SearchBar,
+  AffixxDashboardWidget,
+  FollowUpEvaluationModal,
+} from '@/components/common'
 import { api } from '@/lib/api'
-import type { Project, Client, Doubt, FollowUp, ProjectTask } from '@/lib/types'
+import type { Project, Client, FollowUp, FollowUpEvaluation, ProjectTask } from '@/lib/types'
 import {
   Briefcase,
   AlertTriangle,
   Calendar,
-  MessageCircle,
   Phone,
   ArrowRight,
   AlertCircle,
-  CheckCircle2,
   Clock,
   Play,
   Square,
   ListTodo,
+  Plus,
+  Check,
+  Lock,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { useTaskTimer } from '@/lib/task-timer-context'
@@ -55,19 +60,27 @@ export default function EmployeeDashboardPage() {
 
 function EmployeeDashboardContent() {
   const { currentUser } = useAuth()
-  const { activePunch, elapsedSeconds, openStopModal, startTaskTimer } = useTaskTimer()
+  const {
+    activePunch,
+    elapsedSeconds,
+    openStopModal,
+    startTaskTimer,
+    pendingAutoClose,
+    openAutoCloseModal,
+  } = useTaskTimer()
 
   const [projects, setProjects] = useState<Project[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [followups, setFollowups] = useState<FollowUp[]>([])
   const [myTasks, setMyTasks] = useState<ProjectTask[]>([])
+  const [taskSearch, setTaskSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  const [evaluatingFollowUp, setEvaluatingFollowUp] = useState<FollowUp | null>(null)
+
   useEffect(() => {
     let mounted = true
-    setLoading(true)
-    setError(null)
 
     Promise.allSettled([
       api.projects.list({ limit: 100 }),
@@ -141,10 +154,74 @@ function EmployeeDashboardContent() {
     [activeProjects],
   )
 
-  const myFollowUps = useMemo(
-    () => (Array.isArray(followups) ? followups.filter((f) => f && f.status === 'pending') : []),
-    [followups],
+  // Filter follow-ups respected by Admin visibility controls & ownership
+  const myFollowUps = useMemo(() => {
+    if (!Array.isArray(followups)) return []
+    return followups.filter((f) => {
+      if (!f || f.status !== 'pending') return false
+      if (f.isVisibleToEmployee === false) return false
+      if (currentUser.role !== 'admin' && currentUser.id && f.assignedToId) {
+        return f.assignedToId === currentUser.id
+      }
+      return true
+    })
+  }, [followups, currentUser.id, currentUser.role])
+
+  // Map clients safely: employee only gets client name and company name (no email, phone, or address)
+  const clientMap = useMemo(
+    () =>
+      new Map(
+        (Array.isArray(clients) ? clients : []).map((c) => [
+          c.id || (c as unknown as { _id?: string })._id || '',
+          { name: c.fullName, company: c.companyName },
+        ]),
+      ),
+    [clients],
   )
+
+  // Resolve real Project Name + Client Company cleanly for any task (no generic "Campaign Workspace")
+  const getTaskProjectDisplay = useCallback(
+    (task: ProjectTask): string => {
+      const rawProjId = task.projectId as unknown as
+        | string
+        | { id?: string; _id?: string; name?: string }
+      const tid =
+        typeof rawProjId === 'object' && rawProjId !== null
+          ? rawProjId.id || rawProjId._id
+          : rawProjId
+      const matchedProj = myProjects.find((p) => p.id === tid)
+      const projName =
+        matchedProj?.name ||
+        (typeof rawProjId === 'object' && rawProjId !== null ? rawProjId.name : undefined) ||
+        task.projectName ||
+        'Assigned Project'
+
+      const clientFromProj = matchedProj
+        ? (matchedProj as unknown as { client?: { companyName?: string } }).client?.companyName ||
+          clientMap.get(matchedProj.clientId)?.company
+        : undefined
+      const companyName = clientFromProj || task.clientName || ''
+
+      if (companyName && !projName.toLowerCase().includes(companyName.toLowerCase())) {
+        return `${projName} (${companyName})`
+      }
+      return projName
+    },
+    [myProjects, clientMap],
+  )
+
+  const filteredTasks = useMemo(() => {
+    const q = taskSearch.trim().toLowerCase()
+    if (!q) return myTasks
+    return myTasks.filter((task) => {
+      const projLabel = getTaskProjectDisplay(task).toLowerCase()
+      return (
+        task.title.toLowerCase().includes(q) ||
+        (task.description || '').toLowerCase().includes(q) ||
+        projLabel.includes(q)
+      )
+    })
+  }, [myTasks, taskSearch, getTaskProjectDisplay])
 
   const statCards = [
     {
@@ -177,14 +254,11 @@ function EmployeeDashboardContent() {
     },
   ]
 
-  // Map clients safely: employee only gets client name and company name (no email, phone, or address)
-  const clientMap = useMemo(
-    () =>
-      new Map(
-        (Array.isArray(clients) ? clients : []).map((c) => [c.id || (c as any)._id, { name: c.fullName, company: c.companyName }]),
-      ),
-    [clients],
-  )
+  function handleFollowUpEvaluated(followupId: string, evaluation: FollowUpEvaluation) {
+    setFollowups((prev) =>
+      prev.map((f) => (f.id === followupId ? { ...f, status: 'done', evaluation } : f)),
+    )
+  }
 
   const activeEmployeeName = currentUser.fullName || 'Team Member'
   const activeEmployeeRole = currentUser.designation || 'Specialist'
@@ -195,12 +269,20 @@ function EmployeeDashboardContent() {
         title={`Welcome, ${activeEmployeeName}!`}
         description={`${activeEmployeeRole} • Active assignments, deadline tracking, and client doubts.`}
         action={
-          <Link href="/employee/projects">
-            <Button variant="primary" size="sm">
-              <Briefcase className="h-4 w-4" />
-              <span>My Projects</span>
-            </Button>
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link href="/employee/tasks?action=add">
+              <Button variant="secondary" size="sm">
+                <Plus className="h-4 w-4" />
+                <span>Add Task</span>
+              </Button>
+            </Link>
+            <Link href="/employee/projects">
+              <Button variant="primary" size="sm">
+                <Briefcase className="h-4 w-4" />
+                <span>My Projects</span>
+              </Button>
+            </Link>
+          </div>
         }
       />
 
@@ -220,6 +302,26 @@ function EmployeeDashboardContent() {
         </div>
       )}
 
+      {/* Pending 8-Hour Auto-Punch Update Reminder */}
+      {pendingAutoClose && (
+        <div className="mb-6 p-4 rounded-2xl bg-warning-light/70 border border-warning/40 text-warning-dark flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-start gap-2.5 text-xs">
+            <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold">
+                Task Auto-Punched at 8-Hour Limit: {pendingAutoClose.taskTitle}
+              </p>
+              <p className="mt-0.5">
+                Please submit a brief progress update and status for your 8-hour work block.
+              </p>
+            </div>
+          </div>
+          <Button variant="primary" size="sm" onClick={openAutoCloseModal}>
+            Submit Work Update
+          </Button>
+        </div>
+      )}
+
       {/* Live Work Session Banner (if timer is active) */}
       {activePunch && (
         <div className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-emerald-500/15 via-emerald-500/5 to-transparent border border-emerald-300 flex items-center justify-between flex-wrap gap-3 shadow-xs">
@@ -234,7 +336,7 @@ function EmployeeDashboardContent() {
               </p>
               <p className="text-[11px] text-emerald-800">
                 {activePunch.projectName ? `Project: ${activePunch.projectName} • ` : ''}
-                Recorded duration is being logged to your work timesheet.
+                Auto-punches at 8h limit • Logging to your work timesheet.
               </p>
             </div>
           </div>
@@ -279,28 +381,44 @@ function EmployeeDashboardContent() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
-        {/* Active Tasks & Projects List — Takes 2 cols on desktop */}
+        {/* Left Column (2 Cols): Actionable Tasks & Assigned Projects */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Actionable Tasks & Punch Timers */}
+          {/* Actionable Tasks & Punch Timers with Search Bar */}
           <Card padding="md">
-            <CardHeader
-              title="My Actionable Tasks"
-              description="Direct deliverables delegated to you across active projects"
-            />
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+              <div>
+                <h3 className="text-sm font-semibold text-text-primary">My Actionable Tasks</h3>
+                <p className="text-xs text-text-muted mt-0.5">
+                  Direct deliverables delegated to you across active projects
+                </p>
+              </div>
+              <SearchBar
+                value={taskSearch}
+                onChange={setTaskSearch}
+                placeholder="Search tasks or project..."
+                className="w-full sm:w-64"
+              />
+            </div>
 
             {loading ? (
               <TableSkeleton rows={3} cols={3} />
-            ) : myTasks.length === 0 ? (
+            ) : filteredTasks.length === 0 ? (
               <div className="py-8 text-center text-xs text-text-muted">
                 <ListTodo className="h-8 w-8 text-slate-300 mx-auto mb-1.5" />
-                <p className="font-semibold text-text-primary">0 Actionable Tasks</p>
-                <p className="mt-0.5">You have no pending sub-tasks assigned. Review your project workspaces below.</p>
+                <p className="font-semibold text-text-primary">
+                  {taskSearch ? 'No matching tasks found' : '0 Actionable Tasks'}
+                </p>
+                <p className="mt-0.5">
+                  {taskSearch
+                    ? `No tasks matched "${taskSearch}".`
+                    : 'You have no pending tasks assigned. Review your project workspaces or add a task.'}
+                </p>
               </div>
             ) : (
               <div className="divide-y divide-border">
-                {myTasks.slice(0, 5).map((task) => {
+                {(taskSearch ? filteredTasks : filteredTasks.slice(0, 6)).map((task) => {
                   const isTaskActive = activePunch?.taskId === task.id
-                  const proj = projects.find((p) => p.id === task.projectId)
+                  const projectLabel = getTaskProjectDisplay(task)
 
                   return (
                     <div
@@ -318,14 +436,16 @@ function EmployeeDashboardContent() {
                                 ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                                 : task.status === 'in_progress'
                                 ? 'bg-blue-50 text-blue-800 border-blue-200'
+                                : task.status === 'review'
+                                ? 'bg-purple-50 text-purple-800 border-purple-200'
                                 : 'bg-slate-100 text-slate-700 border-slate-200'
                             }`}
                           >
                             {task.status.replace('_', ' ')}
                           </span>
                         </div>
-                        <p className="text-xs text-text-muted mt-0.5">
-                          Project: {proj?.name || task.projectName || 'Campaign Workspace'} • Logged: {task.totalLoggedMinutes || 0}m
+                        <p className="text-xs text-text-muted mt-0.5 truncate">
+                          Project: <strong className="text-text-secondary">{projectLabel}</strong> • Logged: {task.totalLoggedMinutes || 0}m
                         </p>
                       </div>
 
@@ -347,7 +467,7 @@ function EmployeeDashboardContent() {
                                 id: task.id,
                                 title: task.title,
                                 projectId: task.projectId,
-                                projectName: proj?.name || task.projectName,
+                                projectName: projectLabel,
                               })
                             }
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-semibold text-xs transition-colors cursor-pointer"
@@ -399,8 +519,8 @@ function EmployeeDashboardContent() {
             ) : (
               <div className="divide-y divide-border">
                 {activeProjects.map((proj) => {
-                  const projId = proj.id || (proj as any)._id
-                  const client = (proj as any).client || clientMap.get(proj.clientId)
+                  const projId = proj.id || (proj as unknown as { _id?: string })._id || ''
+                  const client = (proj as unknown as { client?: { company?: string; companyName?: string } }).client || clientMap.get(proj.clientId)
                   const isLate = isOverdue(proj.deliveryDate, proj.status)
                   const daysLeft = getDaysUntil(proj.deliveryDate)
 
@@ -437,7 +557,7 @@ function EmployeeDashboardContent() {
                           <span>
                             Client:{' '}
                             <strong className="text-text-primary">
-                              {client?.company || client?.companyName || (proj as any).clientName || 'Client'}
+                              {client?.company || (client as { companyName?: string })?.companyName || (proj as unknown as { clientName?: string }).clientName || 'Client'}
                             </strong>
                           </span>
                         </div>
@@ -461,7 +581,7 @@ function EmployeeDashboardContent() {
                           </p>
                         </div>
 
-                        <Link href={`/employee/projects/${proj.id}`}>
+                        <Link href={`/employee/projects/${projId}`}>
                           <Button variant="secondary" size="sm">
                             Open Workspace
                           </Button>
@@ -475,8 +595,8 @@ function EmployeeDashboardContent() {
           </Card>
         </div>
 
-        {/* Right Column: Pending Follow-ups */}
-        <div>
+        {/* Right Column: Pending Follow-ups + AFFIXX Dashboard Model */}
+        <div className="space-y-6">
           <Card padding="md">
             <CardHeader
               title="My Follow-ups"
@@ -503,35 +623,47 @@ function EmployeeDashboardContent() {
               <div className="space-y-3">
                 {myFollowUps.map((fu) => {
                   const client = clientMap.get(fu.clientId)
+                  const hideNotes = fu.hideDetailsFromEmployee === true
 
                   return (
                     <div
                       key={fu.id}
                       className="p-3 rounded-lg border border-border bg-surface text-xs space-y-1.5"
                     >
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between gap-2">
                         <span className="font-semibold text-text-primary truncate">
                           {client?.company || 'Client'}
                         </span>
-                        <span className="text-[11px] text-text-muted flex items-center gap-1">
+                        <span className="text-[11px] text-text-muted flex items-center gap-1 whitespace-nowrap">
                           <Clock className="h-3 w-3" />
                           {formatDate(fu.scheduledAt)}
                         </span>
                       </div>
 
-                      {fu.notes && (
-                        <p className="text-text-secondary line-clamp-2">{fu.notes}</p>
+                      {hideNotes ? (
+                        <p className="text-[11px] text-text-muted italic flex items-center gap-1">
+                          <Lock className="h-3 w-3" />
+                          <span>Call details restricted by Admin</span>
+                        </p>
+                      ) : (
+                        fu.notes && (
+                          <p className="text-text-secondary line-clamp-2">{fu.notes}</p>
+                        )
                       )}
 
-                      <div className="flex items-center justify-between pt-1 border-t border-border/60">
-                        <Badge variant="green" size="sm">
+                      <div className="flex items-center justify-between pt-1.5 border-t border-border/60 gap-2">
+                        <Badge variant="amber" size="sm">
                           Pending
                         </Badge>
-                        <Link href="/employee/followups">
-                          <Button variant="ghost" size="sm" className="h-6 text-[11px]">
-                            View
-                          </Button>
-                        </Link>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="h-7 text-[11px]"
+                          onClick={() => setEvaluatingFollowUp(fu)}
+                        >
+                          <Check className="h-3 w-3 text-success" />
+                          <span>Done & Evaluate</span>
+                        </Button>
                       </div>
                     </div>
                   )
@@ -539,8 +671,23 @@ function EmployeeDashboardContent() {
               </div>
             )}
           </Card>
+
+          {/* AFFIXX Workspace & HRMS Overview Widget */}
+          <AffixxDashboardWidget tasks={myTasks} />
         </div>
       </div>
+
+      {/* Follow-up Evaluation Modal */}
+      {evaluatingFollowUp && (
+        <FollowUpEvaluationModal
+          followUp={evaluatingFollowUp}
+          clientCompanyName={clientMap.get(evaluatingFollowUp.clientId)?.company}
+          employeeName={currentUser.fullName}
+          isOpen={!!evaluatingFollowUp}
+          onClose={() => setEvaluatingFollowUp(null)}
+          onSubmitted={handleFollowUpEvaluated}
+        />
+      )}
     </ContentWrapper>
   )
 }

@@ -4,7 +4,7 @@
 // Admin Project Detail — 5-stage pipeline status changer, financial profit audit, doubts resolution thread, follow-ups, and notes.
 
 import { useState, useMemo, useEffect, Suspense } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { ContentWrapper } from '@/components/layout/ContentWrapper'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -21,7 +21,7 @@ import {
   CardSkeleton,
   TableSkeleton,
 } from '@/components/ui'
-import { ProjectPipelineStepper } from '@/components/common'
+import { SearchBar, MultiEmployeeSelect } from '@/components/common'
 import { api } from '@/lib/api'
 import type {
   Project,
@@ -32,31 +32,21 @@ import type {
   FollowUp,
   Note,
   ProjectStatus,
-  ProjectPriority,
-  DoubtPriority,
   ProjectTask,
   TaskPunch,
   TaskPriority,
   TaskStatus,
 } from '@/lib/types'
 import {
-  Briefcase,
-  Building2,
-  Calendar,
   Clock,
-  User,
-  Users,
   IndianRupee,
   CheckCircle2,
-  AlertTriangle,
   MessageCircle,
   Phone,
   ArrowLeft,
   Plus,
   Send,
   Bell,
-  TrendingUp,
-  FileText,
   Check,
   CheckSquare,
   Square,
@@ -64,13 +54,15 @@ import {
   UserCheck,
   History,
   ListTodo,
+  Pencil,
+  Calendar,
+  Eye,
+  EyeOff,
 } from 'lucide-react'
 import {
   formatDate,
   formatDateTime,
   formatCurrency,
-  getStatusLabel,
-  getStatusColor,
   getPriorityColor,
   getPriorityLabel,
   getDaysUntil,
@@ -88,7 +80,6 @@ export default function AdminProjectDetailPage() {
 
 function AdminProjectDetailContent() {
   const params = useParams()
-  const router = useRouter()
   const projectId = params?.id as string
 
   const [loading, setLoading] = useState(true)
@@ -111,28 +102,43 @@ function AdminProjectDetailContent() {
   const [followupDate, setFollowupDate] = useState('')
   const [followupNotes, setFollowupNotes] = useState('')
   const [followupAssignee, setFollowupAssignee] = useState('admin')
+  const [followupVisibleToEmp, setFollowupVisibleToEmp] = useState(true)
+  const [followupHideDetails, setFollowupHideDetails] = useState(false)
 
   // Notes state
   const [projectNotes, setProjectNotes] = useState<Note[]>([])
   const [newNote, setNewNote] = useState('')
 
-  // Financial Edit Modal
+  // Financial & Single Metric Edit Modals
   const [isFinancialModalOpen, setIsFinancialModalOpen] = useState(false)
+  const [financialEditMode, setFinancialEditMode] = useState<'all' | 'budget' | 'cost'>('all')
   const [editBudget, setEditBudget] = useState('0')
   const [editCost, setEditCost] = useState('0')
 
+  // Deadline Status Edit Modal
+  const [isDeadlineModalOpen, setIsDeadlineModalOpen] = useState(false)
+  const [editDeliveryDate, setEditDeliveryDate] = useState('')
+  const [editDeadlineStatus, setEditDeadlineStatus] = useState('')
+  const [editProjectStatus, setEditProjectStatus] = useState<ProjectStatus>('new')
+
   // Tasks state
   const [projectTasks, setProjectTasks] = useState<ProjectTask[]>([])
+  const [taskSearch, setTaskSearch] = useState('')
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
-  const [bulkAssignee, setBulkAssignee] = useState<string>('')
+  const [bulkAssigneeIds, setBulkAssigneeIds] = useState<string[]>([])
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false)
+  const [editingTask, setEditingTask] = useState<ProjectTask | null>(null)
   const [taskTitle, setTaskTitle] = useState('')
   const [taskDesc, setTaskDesc] = useState('')
-  const [taskAssignee, setTaskAssignee] = useState<string>('')
+  const [taskAssigneeIds, setTaskAssigneeIds] = useState<string[]>([])
   const [taskPriority, setTaskPriority] = useState<TaskPriority>('medium')
+  const [taskStatus, setTaskStatus] = useState<TaskStatus>('todo')
   const [taskDueDate, setTaskDueDate] = useState('')
   const [taskEstHours, setTaskEstHours] = useState('')
   const [isSavingTask, setIsSavingTask] = useState(false)
+
+  // View Full Task Details Modal
+  const [viewingTask, setViewingTask] = useState<ProjectTask | null>(null)
 
   // Punches history modal
   const [isPunchesModalOpen, setIsPunchesModalOpen] = useState(false)
@@ -142,7 +148,6 @@ function AdminProjectDetailContent() {
 
   useEffect(() => {
     let mounted = true
-    setLoading(true)
 
     Promise.allSettled([
       api.projects.getById(projectId),
@@ -162,6 +167,11 @@ function AdminProjectDetailContent() {
           setProject(p)
           setEditBudget(p.budget?.toString() || '0')
           setEditCost(p.actualCost?.toString() || '0')
+          setEditDeliveryDate(
+            p.deliveryDate ? new Date(p.deliveryDate).toISOString().split('T')[0] : '',
+          )
+          setEditDeadlineStatus(p.deadlineStatus || '')
+          setEditProjectStatus(p.status)
         }
 
         if (clientRes.status === 'fulfilled') setClients(clientRes.value?.clients || [])
@@ -188,16 +198,32 @@ function AdminProjectDetailContent() {
   }, [projectId])
 
   // Lookup data
+  const extendedProject = project as
+    | (Project & {
+        client?: Client
+        clientName?: string
+        clientContact?: string
+        primaryEmployee?: Employee
+      })
+    | null
+
   const client =
-    (project as any)?.client ||
-    (project ? clients.find((c) => (c.id || (c as any)._id) === project.clientId) : null)
+    extendedProject?.client ||
+    (project
+      ? clients.find((c) => (c.id || (c as unknown as { _id?: string })._id) === project.clientId)
+      : null)
   const primaryEmp =
-    (project as any)?.primaryEmployee ||
+    extendedProject?.primaryEmployee ||
     (project?.primaryEmployeeId
-      ? employees.find((e) => (e.id || (e as any)._id) === project.primaryEmployeeId)
+      ? employees.find(
+          (e) => (e.id || (e as unknown as { _id?: string })._id) === project.primaryEmployeeId,
+        )
       : null)
   const categoryMap = useMemo(
-    () => new Map(categories.map((c) => [c.id || (c as any)._id, c])),
+    () =>
+      new Map(
+        categories.map((c) => [c.id || (c as unknown as { _id?: string })._id || '', c]),
+      ),
     [categories],
   )
 
@@ -236,31 +262,63 @@ function AdminProjectDetailContent() {
     )
   }
 
-  // Update Status
-  async function handleStatusChange(newStatus: ProjectStatus) {
-    const updated = { ...project!, status: newStatus, updatedAt: new Date().toISOString() }
-    setProject(updated)
-    try {
-      await api.projects.updateStatus(project!.id, newStatus)
-    } catch {}
-  }
-
-  // Update Financials
+  // Update Financials (Budget / Cost / Both)
   async function handleSaveFinancials(e: React.FormEvent) {
     e.preventDefault()
+    const numBudget =
+      financialEditMode === 'cost' ? project!.budget : Number(editBudget) || 0
+    const numCost =
+      financialEditMode === 'budget'
+        ? project!.actualCost
+        : editCost !== ''
+        ? Number(editCost)
+        : undefined
+
     const updated = {
       ...project!,
-      budget: Number(editBudget) || 0,
-      actualCost: editCost ? Number(editCost) : undefined,
+      budget: numBudget,
+      agreedBudget: numBudget,
+      actualCost: numCost,
+      incurredCost: numCost,
       updatedAt: new Date().toISOString(),
     }
     setProject(updated)
     setIsFinancialModalOpen(false)
 
     try {
-      await api.projects.updateFinancials(project!.id, {
-        budget: Number(editBudget) || 0,
-        actualCost: editCost ? Number(editCost) : undefined,
+      await api.projects.patchDetails(project!.id, {
+        ...(financialEditMode !== 'cost'
+          ? { agreedBudget: numBudget, budget: numBudget }
+          : {}),
+        ...(financialEditMode !== 'budget'
+          ? { incurredCost: numCost, actualCost: numCost }
+          : {}),
+      })
+    } catch {}
+  }
+
+  // Update Deadline & Status
+  async function handleSaveDeadline(e: React.FormEvent) {
+    e.preventDefault()
+    if (!editDeliveryDate) return
+    const isoDeadline = new Date(editDeliveryDate).toISOString()
+
+    const updated: Project = {
+      ...project!,
+      deliveryDate: isoDeadline,
+      deadlineStatus: editDeadlineStatus.trim() || undefined,
+      status: editProjectStatus,
+      updatedAt: new Date().toISOString(),
+    }
+    setProject(updated)
+    setIsDeadlineModalOpen(false)
+
+    try {
+      await api.projects.patchDetails(project!.id, {
+        deliveryDate: isoDeadline,
+        deadline: isoDeadline,
+        deadlineStatus: editDeadlineStatus.trim() || undefined,
+        status: editProjectStatus,
       })
     } catch {}
   }
@@ -312,7 +370,7 @@ function AdminProjectDetailContent() {
     e.preventDefault()
     if (!followupDate) return
 
-    const newFU = {
+    const newFU: FollowUp = {
       id: `fu-${generateId()}`,
       projectId: project!.id,
       clientId: project!.clientId,
@@ -324,21 +382,31 @@ function AdminProjectDetailContent() {
           : employees.find((e) => e.id === followupAssignee)?.fullName || 'Staff',
       notes: followupNotes.trim() || undefined,
       status: 'pending' as const,
+      isVisibleToEmployee: followupVisibleToEmp,
+      hideDetailsFromEmployee: followupHideDetails,
       createdAt: new Date().toISOString(),
     }
 
     setProjectFollowUps([newFU, ...projectFollowUps])
     setIsFollowupModalOpen(false)
+    const scheduledIso = newFU.scheduledAt
+    const notesVal = newFU.notes
+    const vis = followupVisibleToEmp
+    const hide = followupHideDetails
     setFollowupDate('')
     setFollowupNotes('')
+    setFollowupVisibleToEmp(true)
+    setFollowupHideDetails(false)
 
     try {
       await api.followups.create({
         projectId: project!.id,
         clientId: project!.clientId,
-        scheduledAt: new Date(followupDate).toISOString(),
+        scheduledAt: scheduledIso,
         assignedToId: followupAssignee,
-        notes: followupNotes.trim() || undefined,
+        notes: notesVal,
+        isVisibleToEmployee: vis,
+        hideDetailsFromEmployee: hide,
       })
     } catch {}
   }
@@ -367,91 +435,179 @@ function AdminProjectDetailContent() {
     } catch {}
   }
 
-  // Tasks: Create
-  async function handleCreateTask(e: React.FormEvent) {
+  function openCreateTaskModal() {
+    setEditingTask(null)
+    setTaskTitle('')
+    setTaskDesc('')
+    setTaskAssigneeIds([])
+    setTaskPriority('medium')
+    setTaskStatus('todo')
+    setTaskDueDate('')
+    setTaskEstHours('')
+    setIsTaskModalOpen(true)
+  }
+
+  function openEditTaskModal(task: ProjectTask) {
+    setEditingTask(task)
+    setTaskTitle(task.title)
+    setTaskDesc(task.description || '')
+    const existingIds =
+      task.assigneeIds && task.assigneeIds.length > 0
+        ? task.assigneeIds
+        : task.assignedToId
+        ? [task.assignedToId]
+        : []
+    setTaskAssigneeIds(existingIds)
+    setTaskPriority(task.priority || 'medium')
+    setTaskStatus(task.status || 'todo')
+    setTaskDueDate(task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '')
+    setTaskEstHours(task.estimatedHours ? String(task.estimatedHours) : '')
+    setIsTaskModalOpen(true)
+  }
+
+  // Tasks: Create or Edit
+  async function handleSaveTask(e: React.FormEvent) {
     e.preventDefault()
     if (!taskTitle.trim()) return
     setIsSavingTask(true)
 
-    try {
-      const emp = employees.find((e) => e.id === taskAssignee)
-      const created = await api.tasks.create(projectId, {
-        title: taskTitle.trim(),
-        description: taskDesc.trim() || undefined,
-        assignedToId: taskAssignee || null,
-        priority: taskPriority,
-        dueDate: taskDueDate || undefined,
-        estimatedHours: taskEstHours ? Number(taskEstHours) : undefined,
-      })
+    const assignedStaffObjs = employees
+      .filter((emp) => taskAssigneeIds.includes(emp.id))
+      .map((emp) => ({
+        id: emp.id,
+        fullName: emp.fullName,
+        designation: emp.designation,
+        email: emp.email,
+      }))
 
-      const taskWithEmp: ProjectTask = {
-        ...created,
-        assignedTo: emp
-          ? { id: emp.id, fullName: emp.fullName, designation: emp.designation, email: emp.email }
-          : null,
+    try {
+      if (editingTask) {
+        const updated = await api.tasks.update(editingTask.id, projectId, {
+          title: taskTitle.trim(),
+          description: taskDesc.trim() || undefined,
+          assigneeIds: taskAssigneeIds,
+          assignedToId: taskAssigneeIds[0] || null,
+          assignees: assignedStaffObjs,
+          priority: taskPriority,
+          status: taskStatus,
+          dueDate: taskDueDate || undefined,
+          estimatedHours: taskEstHours ? Number(taskEstHours) : undefined,
+        })
+        setProjectTasks((prev) =>
+          prev.map((t) =>
+            t.id === editingTask.id
+              ? {
+                  ...t,
+                  ...updated,
+                  assigneeIds: taskAssigneeIds,
+                  assignees: assignedStaffObjs,
+                  assignedToId: taskAssigneeIds[0] || null,
+                  assignedTo: assignedStaffObjs[0] || null,
+                }
+              : t,
+          ),
+        )
+      } else {
+        const created = await api.tasks.create(projectId, {
+          title: taskTitle.trim(),
+          description: taskDesc.trim() || undefined,
+          assigneeIds: taskAssigneeIds,
+          assignedToId: taskAssigneeIds[0] || null,
+          assignees: assignedStaffObjs,
+          priority: taskPriority,
+          status: taskStatus,
+          startDate: new Date().toISOString(),
+          dueDate: taskDueDate || undefined,
+          estimatedHours: taskEstHours ? Number(taskEstHours) : undefined,
+        })
+
+        const taskWithEmp: ProjectTask = {
+          ...created,
+          startDate: created.startDate || created.createdAt || new Date().toISOString(),
+          assigneeIds: taskAssigneeIds,
+          assignees: assignedStaffObjs,
+          assignedToId: taskAssigneeIds[0] || null,
+          assignedTo: assignedStaffObjs[0] || null,
+        }
+        setProjectTasks((prev) => [taskWithEmp, ...prev])
       }
 
-      setProjectTasks((prev) => [taskWithEmp, ...prev])
       setIsTaskModalOpen(false)
-      setTaskTitle('')
-      setTaskDesc('')
-      setTaskAssignee('')
-      setTaskPriority('medium')
-      setTaskDueDate('')
-      setTaskEstHours('')
+      setEditingTask(null)
     } finally {
       setIsSavingTask(false)
     }
   }
 
-  // Tasks: Inline Reassign
-  async function handleReassignTask(taskId: string, empId: string) {
-    const targetEmpId = empId === 'unassigned' ? null : empId
-    const emp = employees.find((e) => e.id === targetEmpId)
-    const empObj = emp
-      ? { id: emp.id, fullName: emp.fullName, designation: emp.designation, email: emp.email }
-      : null
+  // Tasks: Inline Multiple Staff Reassign
+  async function handleReassignMultiple(taskId: string, empIds: string[]) {
+    const staffObjs = employees
+      .filter((e) => empIds.includes(e.id))
+      .map((e) => ({
+        id: e.id,
+        fullName: e.fullName,
+        designation: e.designation,
+        email: e.email,
+      }))
 
     setProjectTasks((prev) =>
       prev.map((t) =>
-        t.id === taskId ? { ...t, assignedToId: targetEmpId, assignedTo: empObj } : t,
+        t.id === taskId
+          ? {
+              ...t,
+              assigneeIds: empIds,
+              assignees: staffObjs,
+              assignedToId: empIds[0] || null,
+              assignedTo: staffObjs[0] || null,
+            }
+          : t,
       ),
     )
 
     try {
-      await api.tasks.assign(taskId, projectId, targetEmpId, empObj)
+      await api.tasks.assignMultiple(taskId, projectId, empIds, staffObjs)
     } catch {}
   }
 
-  // Tasks: Bulk Assign
+  // Tasks: Bulk Assign (Multiple Employees)
   async function handleBulkAssign() {
-    if (selectedTaskIds.length === 0 || !bulkAssignee) return
-    const targetEmpId = bulkAssignee === 'unassigned' ? null : bulkAssignee
-    const emp = employees.find((e) => e.id === targetEmpId)
-    const empObj = emp
-      ? { id: emp.id, fullName: emp.fullName, designation: emp.designation, email: emp.email }
-      : null
+    if (selectedTaskIds.length === 0) return
+    const staffObjs = employees
+      .filter((e) => bulkAssigneeIds.includes(e.id))
+      .map((e) => ({
+        id: e.id,
+        fullName: e.fullName,
+        designation: e.designation,
+        email: e.email,
+      }))
 
+    const targetTaskIds = [...selectedTaskIds]
     setProjectTasks((prev) =>
       prev.map((t) =>
-        selectedTaskIds.includes(t.id)
-          ? { ...t, assignedToId: targetEmpId, assignedTo: empObj }
+        targetTaskIds.includes(t.id)
+          ? {
+              ...t,
+              assigneeIds: bulkAssigneeIds,
+              assignees: staffObjs,
+              assignedToId: bulkAssigneeIds[0] || null,
+              assignedTo: staffObjs[0] || null,
+            }
           : t,
       ),
     )
     setSelectedTaskIds([])
 
     try {
-      await api.tasks.bulkAssign(selectedTaskIds, projectId, targetEmpId, empObj)
+      await api.tasks.bulkAssignMultiple(targetTaskIds, projectId, bulkAssigneeIds, staffObjs)
     } catch {}
   }
 
   // Tasks: Toggle Select All
-  function handleToggleSelectAll() {
-    if (selectedTaskIds.length === projectTasks.length) {
+  function handleToggleSelectAll(visibleTasks: ProjectTask[]) {
+    if (selectedTaskIds.length === visibleTasks.length && visibleTasks.length > 0) {
       setSelectedTaskIds([])
     } else {
-      setSelectedTaskIds(projectTasks.map((t) => t.id))
+      setSelectedTaskIds(visibleTasks.map((t) => t.id))
     }
   }
 
@@ -488,6 +644,37 @@ function AdminProjectDetailContent() {
     ? projectDoubts.filter((d) => d && d.status === 'open').length
     : 0
 
+  const getTaskAssigneeIds = (task: ProjectTask): string[] => {
+    if (Array.isArray(task.assigneeIds) && task.assigneeIds.length > 0) return task.assigneeIds
+    if (task.assignedToId) return [task.assignedToId]
+    return []
+  }
+
+  const getTaskAssigneeNames = (task: ProjectTask): string[] => {
+    const ids = getTaskAssigneeIds(task)
+    if (ids.length === 0) return []
+    return ids.map((id) => {
+      const fromTask = task.assignees?.find((a) => a.id === id)
+      if (fromTask?.fullName) return fromTask.fullName
+      const fromEmp = employees.find((e) => e.id === id)
+      if (fromEmp?.fullName) return fromEmp.fullName
+      if (task.assignedTo?.id === id && task.assignedTo.fullName) return task.assignedTo.fullName
+      return 'Staff'
+    })
+  }
+
+  const filteredTasks = projectTasks.filter((t) => {
+    if (!taskSearch.trim()) return true
+    const q = taskSearch.trim().toLowerCase()
+    const names = getTaskAssigneeNames(t).join(' ').toLowerCase()
+    return (
+      t.title.toLowerCase().includes(q) ||
+      (t.description || '').toLowerCase().includes(q) ||
+      names.includes(q) ||
+      t.status.toLowerCase().includes(q)
+    )
+  })
+
   const tabs = [
     { id: 'overview', label: 'Overview & Scope' },
     { id: 'tasks', label: 'Tasks & Assignment', count: projectTasks.length },
@@ -508,7 +695,14 @@ function AdminProjectDetailContent() {
           { label: project.name },
         ]}
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span
+              className={`px-2.5 py-1 rounded-full text-xs font-medium ${getPriorityColor(
+                project.priority,
+              )}`}
+            >
+              {getPriorityLabel(project.priority)}
+            </span>
             <Button
               variant="secondary"
               size="sm"
@@ -520,7 +714,12 @@ function AdminProjectDetailContent() {
             <Button
               variant="primary"
               size="sm"
-              onClick={() => setIsFinancialModalOpen(true)}
+              onClick={() => {
+                setFinancialEditMode('all')
+                setEditBudget(project.budget?.toString() || '0')
+                setEditCost(project.actualCost?.toString() || '0')
+                setIsFinancialModalOpen(true)
+              }}
             >
               <IndianRupee className="h-4 w-4" />
               <span>Financials</span>
@@ -529,53 +728,47 @@ function AdminProjectDetailContent() {
         }
       />
 
-      {/* 5-Stage Status Interactive Connected Pipeline */}
-      <Card padding="md" className="mb-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
-          <div>
-            <h3 className="text-sm font-bold text-text-primary">
-              Project Lifecycle Stage
-            </h3>
-            <p className="text-xs text-text-muted mt-0.5">
-              Click any stage to update live status. Reminders automatically cease when Delivered.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span
-              className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(
-                project.status,
-              )}`}
-            >
-              Current: {getStatusLabel(project.status)}
-            </span>
-            <span
-              className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(
-                project.priority,
-              )}`}
-            >
-              {getPriorityLabel(project.priority)}
-            </span>
-          </div>
-        </div>
-
-        <ProjectPipelineStepper
-          currentStatus={project.status}
-          onStatusChange={handleStatusChange}
-        />
-      </Card>
-
       {/* Metric Cards: Budget, Cost, Profit, Deadline */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <Card padding="md">
-          <p className="text-xs text-text-muted">Agreed Budget</p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs text-text-muted">Agreed Budget</p>
+            <button
+              type="button"
+              onClick={() => {
+                setFinancialEditMode('budget')
+                setEditBudget(project.budget?.toString() || '0')
+                setIsFinancialModalOpen(true)
+              }}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 transition-colors cursor-pointer"
+              title="Edit Agreed Budget"
+            >
+              <Pencil className="h-3 w-3" />
+              <span>Edit</span>
+            </button>
+          </div>
           <p className="text-xl font-bold text-text-primary mt-1">
             {formatCurrency(project.budget)}
           </p>
         </Card>
 
         <Card padding="md">
-          <p className="text-xs text-text-muted">Incurred Cost</p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs text-text-muted">Incurred Cost</p>
+            <button
+              type="button"
+              onClick={() => {
+                setFinancialEditMode('cost')
+                setEditCost(project.actualCost?.toString() || '0')
+                setIsFinancialModalOpen(true)
+              }}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 transition-colors cursor-pointer"
+              title="Edit Incurred Cost"
+            >
+              <Pencil className="h-3 w-3" />
+              <span>Edit</span>
+            </button>
+          </div>
           <p className="text-xl font-bold text-text-secondary mt-1">
             {formatCurrency(currentCost)}
           </p>
@@ -596,7 +789,27 @@ function AdminProjectDetailContent() {
         </Card>
 
         <Card padding="md">
-          <p className="text-xs text-text-muted">Deadline Status</p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs text-text-muted">Deadline Status</p>
+            <button
+              type="button"
+              onClick={() => {
+                setEditDeliveryDate(
+                  project.deliveryDate
+                    ? new Date(project.deliveryDate).toISOString().split('T')[0]
+                    : '',
+                )
+                setEditDeadlineStatus(project.deadlineStatus || '')
+                setEditProjectStatus(project.status)
+                setIsDeadlineModalOpen(true)
+              }}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 transition-colors cursor-pointer"
+              title="Edit Deadline Status"
+            >
+              <Pencil className="h-3 w-3" />
+              <span>Edit</span>
+            </button>
+          </div>
           <div suppressHydrationWarning>
             <p
               className={`text-base font-bold mt-1 ${
@@ -606,7 +819,9 @@ function AdminProjectDetailContent() {
               {formatDate(project.deliveryDate)}
             </p>
             <p className="text-[11px] text-text-muted mt-0.5">
-              {isLate
+              {project.deadlineStatus
+                ? project.deadlineStatus
+                : isLate
                 ? 'Past delivery date!'
                 : project.status === 'delivered'
                 ? 'Delivered to client'
@@ -639,18 +854,23 @@ function AdminProjectDetailContent() {
                   Service Deliverable Categories
                 </h4>
                 <div className="flex flex-wrap gap-2">
-                  {Array.isArray(project.serviceCategories) && project.serviceCategories.map((catItem: any) => {
-                    const catId = typeof catItem === 'object' && catItem !== null ? catItem.id || catItem._id : catItem
-                    const cat = typeof catItem === 'object' && catItem !== null ? catItem : categoryMap.get(catId)
-                    return (
-                      <span
-                        key={catId}
-                        className="px-3 py-1 rounded-lg bg-brand-50 border border-brand-200 text-xs font-medium text-brand-700"
-                      >
-                        {cat?.name || (typeof catItem === 'string' ? catItem : 'Service')}
-                      </span>
-                    )
-                  })}
+                  {Array.isArray(project.serviceCategories) &&
+                    project.serviceCategories.map((catItem: unknown) => {
+                      const catObj =
+                        typeof catItem === 'object' && catItem !== null
+                          ? (catItem as { id?: string; _id?: string; name?: string })
+                          : null
+                      const catId = catObj ? catObj.id || catObj._id || '' : String(catItem)
+                      const cat = catObj || categoryMap.get(catId)
+                      return (
+                        <span
+                          key={catId}
+                          className="px-3 py-1 rounded-lg bg-brand-50 border border-brand-200 text-xs font-medium text-brand-700"
+                        >
+                          {cat?.name || (typeof catItem === 'string' ? catItem : 'Service')}
+                        </span>
+                      )
+                    })}
                 </div>
               </div>
             </Card>
@@ -706,13 +926,13 @@ function AdminProjectDetailContent() {
                 <div>
                   <p className="text-text-muted">Company</p>
                   <p className="font-semibold text-sm text-text-primary mt-0.5">
-                    {client?.companyName || (project as any).clientName || 'N/A'}
+                    {client?.companyName || extendedProject?.clientName || 'N/A'}
                   </p>
                 </div>
                 <div>
                   <p className="text-text-muted">Contact Person</p>
                   <p className="font-medium text-text-primary mt-0.5">
-                    {client?.fullName || (project as any).clientContact || 'N/A'}
+                    {client?.fullName || extendedProject?.clientContact || 'N/A'}
                   </p>
                 </div>
                 <div>
@@ -747,9 +967,18 @@ function AdminProjectDetailContent() {
                   <div>
                     <p className="text-text-muted mb-1.5">Collaborators</p>
                     <div className="space-y-1">
-                      {project.additionalMemberIds.map((mItem: any) => {
-                        const mId = typeof mItem === 'object' && mItem !== null ? mItem.id || mItem._id : mItem
-                        const m = typeof mItem === 'object' && mItem !== null ? mItem : employees.find((e: Employee) => (e.id || (e as any)._id) === mId)
+                      {project.additionalMemberIds.map((mItem: unknown) => {
+                        const mObj =
+                          typeof mItem === 'object' && mItem !== null
+                            ? (mItem as { id?: string; _id?: string; fullName?: string; designation?: string })
+                            : null
+                        const mId = mObj ? mObj.id || mObj._id || '' : String(mItem)
+                        const m =
+                          mObj ||
+                          employees.find(
+                            (e: Employee) =>
+                              (e.id || (e as unknown as { _id?: string })._id) === mId,
+                          )
                         return (
                           <div
                             key={mId}
@@ -779,18 +1008,26 @@ function AdminProjectDetailContent() {
                   Project Tasks & Staff Delegation
                 </h3>
                 <p className="text-xs text-text-muted mt-0.5">
-                  Granular task assignment for team members. Assign individual tasks or select all at once.
+                  Click any deliverable for full details. Assign one or multiple staff members to each task.
                 </p>
               </div>
 
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => setIsTaskModalOpen(true)}
-              >
-                <Plus className="h-4 w-4" />
-                <span>Add Task</span>
-              </Button>
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                <SearchBar
+                  value={taskSearch}
+                  onChange={setTaskSearch}
+                  placeholder="Search tasks or staff..."
+                  className="w-full sm:w-64"
+                />
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={openCreateTaskModal}
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Add Task</span>
+                </Button>
+              </div>
             </div>
 
             {/* Metric Highlights */}
@@ -814,7 +1051,7 @@ function AdminProjectDetailContent() {
               <div>
                 <span className="text-text-muted">Unassigned Tasks</span>
                 <p className="font-bold text-amber-600 text-base">
-                  {projectTasks.filter((t) => !t.assignedToId).length}
+                  {projectTasks.filter((t) => getTaskAssigneeIds(t).length === 0).length}
                 </p>
               </div>
             </div>
@@ -824,15 +1061,15 @@ function AdminProjectDetailContent() {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={handleToggleSelectAll}
+                  onClick={() => handleToggleSelectAll(filteredTasks)}
                   className="flex items-center gap-1.5 font-medium text-text-secondary hover:text-text-primary cursor-pointer"
                 >
-                  {selectedTaskIds.length === projectTasks.length && projectTasks.length > 0 ? (
+                  {selectedTaskIds.length === filteredTasks.length && filteredTasks.length > 0 ? (
                     <CheckSquare className="h-4 w-4 text-brand-600" />
                   ) : (
                     <Square className="h-4 w-4 text-text-muted" />
                   )}
-                  <span>Select All Tasks ({projectTasks.length})</span>
+                  <span>Select All Tasks ({filteredTasks.length})</span>
                 </button>
 
                 {selectedTaskIds.length > 0 && (
@@ -843,76 +1080,80 @@ function AdminProjectDetailContent() {
               </div>
 
               {selectedTaskIds.length > 0 && (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-text-muted hidden sm:inline">Assign selected to:</span>
-                  <select
-                    value={bulkAssignee}
-                    onChange={(e) => setBulkAssignee(e.target.value)}
-                    className="h-8 rounded-lg border border-border bg-white px-2.5 text-xs text-text-primary cursor-pointer"
-                  >
-                    <option value="">Select Employee...</option>
-                    <option value="unassigned">-- Unassign Selected --</option>
-                    {employees.map((emp) => (
-                      <option key={emp.id} value={emp.id}>
-                        {emp.fullName} ({emp.designation})
-                      </option>
-                    ))}
-                  </select>
+                  <MultiEmployeeSelect
+                    employees={employees}
+                    selectedIds={bulkAssigneeIds}
+                    onChange={setBulkAssigneeIds}
+                    placeholder="Choose staff..."
+                    compact
+                    className="w-52"
+                  />
 
                   <Button
                     variant="primary"
                     size="sm"
                     onClick={handleBulkAssign}
-                    disabled={!bulkAssignee}
                   >
                     <UserCheck className="h-3.5 w-3.5" />
-                    <span>Assign at Once</span>
+                    <span>{bulkAssigneeIds.length === 0 ? 'Unassign Selected' : 'Assign at Once'}</span>
                   </Button>
                 </div>
               )}
             </div>
 
             {/* Task Items List */}
-            {projectTasks.length === 0 ? (
+            {filteredTasks.length === 0 ? (
               <div className="py-12 text-center text-xs text-text-muted border border-dashed border-border rounded-xl">
                 <ListTodo className="h-8 w-8 text-slate-300 mx-auto mb-2" />
-                <p className="font-semibold text-text-primary text-sm">0 Tasks Defined</p>
-                <p className="mt-1 max-w-sm mx-auto">
-                  Create granular deliverables for this campaign and assign them to specific employees.
+                <p className="font-semibold text-text-primary text-sm">
+                  {taskSearch ? 'No Matching Tasks Found' : '0 Tasks Defined'}
                 </p>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setIsTaskModalOpen(true)}
-                  className="mt-3"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  <span>Create First Task</span>
-                </Button>
+                <p className="mt-1 max-w-sm mx-auto">
+                  {taskSearch
+                    ? `No tasks matched "${taskSearch}". Try another search keyword.`
+                    : 'Create granular deliverables for this campaign and assign them to specific team members.'}
+                </p>
+                {taskSearch ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setTaskSearch('')}
+                    className="mt-3"
+                  >
+                    Clear Search
+                  </Button>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={openCreateTaskModal}
+                    className="mt-3"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>Create First Task</span>
+                  </Button>
+                )}
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs text-text-secondary">
-                  <thead className="bg-surface border-b border-border text-text-primary font-semibold">
-                    <tr>
-                      <th className="py-3 px-3 w-8"></th>
-                      <th className="py-3 px-3">Task Deliverable</th>
-                      <th className="py-3 px-3">Assigned Staff</th>
-                      <th className="py-3 px-3">Priority</th>
-                      <th className="py-3 px-3">Status</th>
-                      <th className="py-3 px-3">Due Date</th>
-                      <th className="py-3 px-3">Time Punches</th>
-                      <th className="py-3 px-3 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border bg-white">
-                    {projectTasks.map((task) => {
-                      const isSelected = selectedTaskIds.includes(task.id)
-                      const isTaskLate = task.dueDate ? new Date(task.dueDate) < new Date() && task.status !== 'completed' : false
+              <>
+                {/* Mobile Card List (< 768px) */}
+                <div className="grid grid-cols-1 gap-3 md:hidden">
+                  {filteredTasks.map((task) => {
+                    const isSelected = selectedTaskIds.includes(task.id)
+                    const isTaskLate = task.dueDate
+                      ? new Date(task.dueDate) < new Date() && task.status !== 'completed'
+                      : false
+                    const currentAssigneeIds = getTaskAssigneeIds(task)
 
-                      return (
-                        <tr key={task.id} className="hover:bg-surface/50 transition-colors">
-                          <td className="py-3 px-3">
+                    return (
+                      <div
+                        key={task.id}
+                        className="p-3.5 rounded-xl border border-border bg-white space-y-3 text-xs"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start gap-2 min-w-0">
                             <button
                               type="button"
                               onClick={() =>
@@ -922,7 +1163,7 @@ function AdminProjectDetailContent() {
                                     : [...prev, task.id],
                                 )
                               }
-                              className="cursor-pointer"
+                              className="mt-0.5 cursor-pointer"
                             >
                               {isSelected ? (
                                 <CheckSquare className="h-4 w-4 text-brand-600" />
@@ -930,112 +1171,263 @@ function AdminProjectDetailContent() {
                                 <Square className="h-4 w-4 text-text-muted" />
                               )}
                             </button>
-                          </td>
-
-                          <td className="py-3 px-3 max-w-[240px]">
-                            <p className="font-semibold text-text-primary text-sm truncate">
-                              {task.title}
-                            </p>
-                            {task.description && (
-                              <p className="text-[11px] text-text-muted line-clamp-1 mt-0.5">
-                                {task.description}
-                              </p>
-                            )}
-                          </td>
-
-                          <td className="py-3 px-3">
-                            <select
-                              value={task.assignedToId || 'unassigned'}
-                              onChange={(e) => handleReassignTask(task.id, e.target.value)}
-                              className="text-xs h-8 rounded-lg border border-border bg-white px-2 py-1 font-medium text-text-primary focus:ring-1 focus:ring-brand-500 cursor-pointer"
-                            >
-                              <option value="unassigned">Unassigned</option>
-                              {employees.map((emp) => (
-                                <option key={emp.id} value={emp.id}>
-                                  {emp.fullName}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-
-                          <td className="py-3 px-3">
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${getPriorityColor(
-                                task.priority,
-                              )}`}
-                            >
-                              {getPriorityLabel(task.priority)}
-                            </span>
-                          </td>
-
-                          <td className="py-3 px-3">
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                                task.status === 'completed'
-                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                  : task.status === 'review'
-                                  ? 'bg-purple-50 text-purple-800 border-purple-200'
-                                  : task.status === 'in_progress'
-                                  ? 'bg-blue-50 text-blue-800 border-blue-200'
-                                  : task.status === 'blocked'
-                                  ? 'bg-rose-50 text-rose-800 border-rose-200'
-                                  : 'bg-slate-100 text-slate-700 border-slate-200'
-                              }`}
-                            >
-                              {task.status === 'completed'
-                                ? 'Completed'
-                                : task.status === 'review'
-                                ? 'Review'
-                                : task.status === 'in_progress'
-                                ? 'In Progress'
-                                : task.status === 'blocked'
-                                ? 'Blocked'
-                                : 'To Do'}
-                            </span>
-                          </td>
-
-                          <td className="py-3 px-3 whitespace-nowrap">
-                            {task.dueDate ? (
-                              <span
-                                suppressHydrationWarning
-                                className={isTaskLate ? 'text-danger font-semibold' : 'text-text-muted'}
-                              >
-                                {formatDate(task.dueDate)}
-                              </span>
-                            ) : (
-                              <span className="text-text-muted/60">—</span>
-                            )}
-                          </td>
-
-                          <td className="py-3 px-3">
                             <button
                               type="button"
-                              onClick={() => handleOpenPunches(task)}
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 hover:bg-brand-50 hover:text-brand-700 text-text-secondary border border-border transition-colors cursor-pointer"
-                              title="View punch time log history"
+                              onClick={() => setViewingTask(task)}
+                              className="text-left min-w-0 cursor-pointer"
                             >
-                              <Clock className="h-3 w-3 text-text-muted" />
-                              <span className="font-mono">{task.totalLoggedMinutes || 0}m</span>
-                              <History className="h-3 w-3 text-text-muted" />
+                              <p className="font-semibold text-sm text-text-primary hover:text-brand-600 underline-offset-2 hover:underline">
+                                {task.title}
+                              </p>
+                              {task.description && (
+                                <p className="text-[11px] text-text-muted line-clamp-1 mt-0.5">
+                                  {task.description}
+                                </p>
+                              )}
                             </button>
-                          </td>
+                          </div>
 
-                          <td className="py-3 px-3 text-right">
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => openEditTaskModal(task)}
+                              className="p-1.5 rounded text-text-muted hover:text-brand-600 hover:bg-brand-50 cursor-pointer"
+                              aria-label="Edit task"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
                             <button
                               type="button"
                               onClick={() => handleDeleteTask(task.id)}
-                              className="p-1 rounded text-text-muted hover:text-danger hover:bg-danger-light transition-colors cursor-pointer"
-                              title="Delete task"
+                              className="p-1.5 rounded text-text-muted hover:text-danger hover:bg-danger-light cursor-pointer"
+                              aria-label="Delete task"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${getPriorityColor(
+                              task.priority,
+                            )}`}
+                          >
+                            {getPriorityLabel(task.priority)}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold border bg-slate-100 text-slate-700 capitalize">
+                            {task.status.replace('_', ' ')}
+                          </span>
+                          <span className="text-[11px] text-text-muted">
+                            Started: {formatDate(task.startDate || task.createdAt)}
+                          </span>
+                          {task.dueDate && (
+                            <span
+                              className={`text-[11px] ${
+                                isTaskLate ? 'text-danger font-semibold' : 'text-text-muted'
+                              }`}
+                            >
+                              Due: {formatDate(task.dueDate)}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2 pt-2 border-t border-border">
+                          <div className="flex-1 min-w-0">
+                            <MultiEmployeeSelect
+                              employees={employees}
+                              selectedIds={currentAssigneeIds}
+                              onChange={(ids) => handleReassignMultiple(task.id, ids)}
+                              placeholder="Assign staff..."
+                              compact
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenPunches(task)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-50 border border-border text-text-secondary cursor-pointer"
+                          >
+                            <Clock className="h-3 w-3" />
+                            <span className="font-mono">{task.totalLoggedMinutes || 0}m</span>
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* Desktop Table View (>= 768px) */}
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full text-left text-xs text-text-secondary">
+                    <thead className="bg-surface border-b border-border text-text-primary font-semibold">
+                      <tr>
+                        <th className="py-3 px-3 w-8"></th>
+                        <th className="py-3 px-3">Task Deliverable</th>
+                        <th className="py-3 px-3">Assigned Staff</th>
+                        <th className="py-3 px-3">Priority</th>
+                        <th className="py-3 px-3">Status</th>
+                        <th className="py-3 px-3">Start Date</th>
+                        <th className="py-3 px-3">Due Date</th>
+                        <th className="py-3 px-3">Time Punches</th>
+                        <th className="py-3 px-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border bg-white">
+                      {filteredTasks.map((task) => {
+                        const isSelected = selectedTaskIds.includes(task.id)
+                        const isTaskLate = task.dueDate
+                          ? new Date(task.dueDate) < new Date() && task.status !== 'completed'
+                          : false
+                        const currentAssigneeIds = getTaskAssigneeIds(task)
+
+                        return (
+                          <tr key={task.id} className="hover:bg-surface/50 transition-colors">
+                            <td className="py-3 px-3">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setSelectedTaskIds((prev) =>
+                                    isSelected
+                                      ? prev.filter((id) => id !== task.id)
+                                      : [...prev, task.id],
+                                  )
+                                }
+                                className="cursor-pointer"
+                                aria-label={`Select ${task.title}`}
+                              >
+                                {isSelected ? (
+                                  <CheckSquare className="h-4 w-4 text-brand-600" />
+                                ) : (
+                                  <Square className="h-4 w-4 text-text-muted" />
+                                )}
+                              </button>
+                            </td>
+
+                            <td className="py-3 px-3 max-w-[230px]">
+                              <button
+                                type="button"
+                                onClick={() => setViewingTask(task)}
+                                className="text-left w-full group cursor-pointer"
+                                title="Click to view full task details"
+                              >
+                                <p className="font-semibold text-text-primary text-sm truncate group-hover:text-brand-600 group-hover:underline">
+                                  {task.title}
+                                </p>
+                                {task.description && (
+                                  <p className="text-[11px] text-text-muted line-clamp-1 mt-0.5">
+                                    {task.description}
+                                  </p>
+                                )}
+                              </button>
+                            </td>
+
+                            <td className="py-3 px-3 min-w-[200px]">
+                              <MultiEmployeeSelect
+                                employees={employees}
+                                selectedIds={currentAssigneeIds}
+                                onChange={(ids) => handleReassignMultiple(task.id, ids)}
+                                placeholder="Assign staff..."
+                                compact
+                              />
+                            </td>
+
+                            <td className="py-3 px-3">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${getPriorityColor(
+                                  task.priority,
+                                )}`}
+                              >
+                                {getPriorityLabel(task.priority)}
+                              </span>
+                            </td>
+
+                            <td className="py-3 px-3">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border whitespace-nowrap ${
+                                  task.status === 'completed'
+                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                    : task.status === 'review'
+                                    ? 'bg-purple-50 text-purple-800 border-purple-200'
+                                    : task.status === 'in_progress'
+                                    ? 'bg-blue-50 text-blue-800 border-blue-200'
+                                    : task.status === 'blocked'
+                                    ? 'bg-rose-50 text-rose-800 border-rose-200'
+                                    : 'bg-slate-100 text-slate-700 border-slate-200'
+                                }`}
+                              >
+                                {task.status === 'completed'
+                                  ? 'Completed'
+                                  : task.status === 'review'
+                                  ? 'Review'
+                                  : task.status === 'in_progress'
+                                  ? 'In Progress'
+                                  : task.status === 'blocked'
+                                  ? 'Blocked'
+                                  : 'To Do'}
+                              </span>
+                            </td>
+
+                            <td className="py-3 px-3 whitespace-nowrap text-text-secondary">
+                              <span suppressHydrationWarning>
+                                {formatDate(task.startDate || task.createdAt)}
+                              </span>
+                            </td>
+
+                            <td className="py-3 px-3 whitespace-nowrap">
+                              {task.dueDate ? (
+                                <span
+                                  suppressHydrationWarning
+                                  className={isTaskLate ? 'text-danger font-semibold' : 'text-text-muted'}
+                                >
+                                  {formatDate(task.dueDate)}
+                                </span>
+                              ) : (
+                                <span className="text-text-muted/60">—</span>
+                              )}
+                            </td>
+
+                            <td className="py-3 px-3">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenPunches(task)}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 hover:bg-brand-50 hover:text-brand-700 text-text-secondary border border-border transition-colors cursor-pointer"
+                                title="View punch time log history"
+                              >
+                                <Clock className="h-3 w-3 text-text-muted" />
+                                <span className="font-mono">{task.totalLoggedMinutes || 0}m</span>
+                                <History className="h-3 w-3 text-text-muted" />
+                              </button>
+                            </td>
+
+                            <td className="py-3 px-3 text-right whitespace-nowrap">
+                              <div className="inline-flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => openEditTaskModal(task)}
+                                  className="p-1.5 rounded text-text-muted hover:text-brand-600 hover:bg-brand-50 transition-colors cursor-pointer"
+                                  title="Edit task"
+                                  aria-label={`Edit ${task.title}`}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteTask(task.id)}
+                                  className="p-1.5 rounded text-text-muted hover:text-danger hover:bg-danger-light transition-colors cursor-pointer"
+                                  title="Delete task"
+                                  aria-label={`Delete ${task.title}`}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
           </Card>
         </div>
@@ -1210,16 +1602,31 @@ function AdminProjectDetailContent() {
                   key={fu.id}
                   className="p-3.5 rounded-xl border border-border bg-surface text-xs space-y-1.5"
                 >
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
                     <span className="font-semibold text-sm text-text-primary">
                       {formatDateTime(fu.scheduledAt)}
                     </span>
-                    <Badge variant={fu.status === 'done' ? 'green' : 'amber'} size="sm">
-                      {fu.status}
-                    </Badge>
+                    <div className="flex items-center gap-1.5">
+                      {fu.isVisibleToEmployee === false && (
+                        <Badge variant="gray" size="sm">Hidden from Staff</Badge>
+                      )}
+                      {fu.evaluation && (
+                        <Badge variant="blue" size="sm">
+                          ★ {fu.evaluation.rating}/5 {fu.evaluation.properlyCompleted ? '• Verified' : '• Partial'}
+                        </Badge>
+                      )}
+                      <Badge variant={fu.status === 'done' ? 'green' : 'amber'} size="sm">
+                        {fu.status}
+                      </Badge>
+                    </div>
                   </div>
                   {fu.notes && (
                     <p className="text-text-secondary leading-relaxed">{fu.notes}</p>
+                  )}
+                  {fu.evaluation?.comments && (
+                    <p className="text-[11px] bg-white p-2 rounded-lg border border-border/70 text-text-secondary">
+                      <strong className="text-text-primary">Call Evaluation:</strong> {fu.evaluation.comments}
+                    </p>
                   )}
                   <p className="text-[11px] text-text-muted pt-1 border-t border-border/60">
                     Assigned Owner: <strong className="text-text-secondary">{fu.assignedToName}</strong>
@@ -1280,11 +1687,17 @@ function AdminProjectDetailContent() {
         </Card>
       )}
 
-      {/* Financials Modal */}
+      {/* Financials Modal (supports Budget-only, Cost-only, or Both) */}
       <Modal
         isOpen={isFinancialModalOpen}
         onClose={() => setIsFinancialModalOpen(false)}
-        title="Update Financial Details"
+        title={
+          financialEditMode === 'budget'
+            ? 'Edit Agreed Project Budget'
+            : financialEditMode === 'cost'
+            ? 'Edit Incurred Project Cost'
+            : 'Update Financial Details'
+        }
         description="Agreed client price and internal expenses for this project"
         footer={
           <>
@@ -1302,22 +1715,90 @@ function AdminProjectDetailContent() {
         }
       >
         <div className="space-y-4">
+          {financialEditMode !== 'cost' && (
+            <Input
+              label="Agreed Project Budget (₹)"
+              type="number"
+              value={editBudget}
+              onChange={(e) => setEditBudget(e.target.value)}
+              leftIcon={<IndianRupee className="h-4 w-4" />}
+              required
+              autoFocus={financialEditMode === 'budget'}
+            />
+          )}
+
+          {financialEditMode !== 'budget' && (
+            <Input
+              label="Incurred / Actual Expenses (₹)"
+              type="number"
+              value={editCost}
+              onChange={(e) => setEditCost(e.target.value)}
+              leftIcon={<IndianRupee className="h-4 w-4" />}
+              hint="Include ad spend, tooling costs, and external fees."
+              autoFocus={financialEditMode === 'cost'}
+            />
+          )}
+        </div>
+      </Modal>
+
+      {/* Edit Deadline Status Modal */}
+      <Modal
+        isOpen={isDeadlineModalOpen}
+        onClose={() => setIsDeadlineModalOpen(false)}
+        title="Edit Project Deadline & Status"
+        description="Update delivery target date and deadline tracking status"
+        size="sm"
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setIsDeadlineModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleSaveDeadline}
+              disabled={!editDeliveryDate}
+            >
+              Save Deadline
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
           <Input
-            label="Project Budget (₹ agreed with client)"
-            type="number"
-            value={editBudget}
-            onChange={(e) => setEditBudget(e.target.value)}
-            leftIcon={<IndianRupee className="h-4 w-4" />}
+            label="Delivery Deadline Date"
+            type="date"
+            value={editDeliveryDate}
+            onChange={(e) => setEditDeliveryDate(e.target.value)}
             required
           />
 
+          <div>
+            <label className="text-sm font-medium text-text-primary block mb-1.5">
+              Project Status
+            </label>
+            <select
+              value={editProjectStatus}
+              onChange={(e) => setEditProjectStatus(e.target.value as ProjectStatus)}
+              className="w-full h-10 rounded-lg border border-border bg-white px-3 text-sm text-text-primary"
+            >
+              <option value="new">New</option>
+              <option value="in_progress">In Progress</option>
+              <option value="under_review">Under Review</option>
+              <option value="completed">Completed</option>
+              <option value="delivered">Delivered</option>
+            </select>
+          </div>
+
           <Input
-            label="Actual / Incurred Expenses (₹)"
-            type="number"
-            value={editCost}
-            onChange={(e) => setEditCost(e.target.value)}
-            leftIcon={<IndianRupee className="h-4 w-4" />}
-            hint="Include ad spend, tooling costs, and external fees."
+            label="Custom Deadline Status Note (optional)"
+            placeholder="e.g. Extended by client, On schedule"
+            value={editDeadlineStatus}
+            onChange={(e) => setEditDeadlineStatus(e.target.value)}
           />
         </div>
       </Modal>
@@ -1382,15 +1863,46 @@ function AdminProjectDetailContent() {
             onChange={(e) => setFollowupNotes(e.target.value)}
             rows={3}
           />
+
+          <div className="p-3 rounded-xl bg-surface border border-border space-y-2 text-xs">
+            <p className="font-semibold text-text-primary flex items-center gap-1.5">
+              {followupVisibleToEmp ? <Eye className="h-3.5 w-3.5 text-brand-600" /> : <EyeOff className="h-3.5 w-3.5 text-text-muted" />}
+              <span>Employee Portal Visibility Controls</span>
+            </p>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={followupVisibleToEmp}
+                onChange={(e) => setFollowupVisibleToEmp(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-border text-brand-600"
+              />
+              <span className="text-text-secondary">Show this follow-up to the assigned employee</span>
+            </label>
+            {followupVisibleToEmp && (
+              <label className="flex items-center gap-2 cursor-pointer pl-5">
+                <input
+                  type="checkbox"
+                  checked={followupHideDetails}
+                  onChange={(e) => setFollowupHideDetails(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-border text-brand-600"
+                />
+                <span className="text-text-secondary">Hide confidential talking points/notes from employee</span>
+              </label>
+            )}
+          </div>
         </div>
       </Modal>
 
-      {/* Create Task Modal */}
+      {/* Create / Edit Task Modal */}
       <Modal
         isOpen={isTaskModalOpen}
         onClose={() => setIsTaskModalOpen(false)}
-        title="Create New Project Task"
-        description={`Define deliverable task for ${project.name}`}
+        title={editingTask ? 'Edit Project Task' : 'Create New Project Task'}
+        description={
+          editingTask
+            ? `Modify details & staff assignments for ${editingTask.title}`
+            : `Define deliverable task for ${project.name}`
+        }
         footer={
           <>
             <Button
@@ -1404,16 +1916,16 @@ function AdminProjectDetailContent() {
             <Button
               variant="primary"
               size="sm"
-              onClick={handleCreateTask}
+              onClick={handleSaveTask}
               isLoading={isSavingTask}
               disabled={!taskTitle.trim()}
             >
-              Add Task
+              {editingTask ? 'Save Task Changes' : 'Add Task'}
             </Button>
           </>
         }
       >
-        <form onSubmit={handleCreateTask} className="space-y-4">
+        <form onSubmit={handleSaveTask} className="space-y-4">
           <Input
             label="Task Title / Deliverable"
             placeholder="e.g. Conduct SEO Audit, Design Homepage Mockup, Write Ad Copy"
@@ -1431,25 +1943,19 @@ function AdminProjectDetailContent() {
             rows={3}
           />
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-semibold text-text-primary block mb-1">
-                Assign To Employee
-              </label>
-              <select
-                value={taskAssignee}
-                onChange={(e) => setTaskAssignee(e.target.value)}
-                className="w-full h-10 rounded-lg border border-border bg-white px-3 text-xs text-text-primary cursor-pointer"
-              >
-                <option value="">Unassigned (Assign later)</option>
-                {employees.map((emp) => (
-                  <option key={emp.id} value={emp.id}>
-                    {emp.fullName} ({emp.designation})
-                  </option>
-                ))}
-              </select>
-            </div>
+          <div>
+            <label className="text-xs font-semibold text-text-primary block mb-1.5">
+              Assign Staff Members (Select One or More)
+            </label>
+            <MultiEmployeeSelect
+              employees={employees}
+              selectedIds={taskAssigneeIds}
+              onChange={setTaskAssigneeIds}
+              placeholder="Select one or multiple employees..."
+            />
+          </div>
 
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-semibold text-text-primary block mb-1">
                 Priority
@@ -1463,6 +1969,23 @@ function AdminProjectDetailContent() {
                 <option value="medium">Medium Priority</option>
                 <option value="high">High Priority</option>
                 <option value="urgent">Urgent</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-text-primary block mb-1">
+                Status
+              </label>
+              <select
+                value={taskStatus}
+                onChange={(e) => setTaskStatus(e.target.value as TaskStatus)}
+                className="w-full h-10 rounded-lg border border-border bg-white px-3 text-xs text-text-primary cursor-pointer"
+              >
+                <option value="todo">To Do</option>
+                <option value="in_progress">In Progress</option>
+                <option value="review">Review</option>
+                <option value="completed">Completed</option>
+                <option value="blocked">Blocked</option>
               </select>
             </div>
           </div>
@@ -1483,7 +2006,147 @@ function AdminProjectDetailContent() {
               onChange={(e) => setTaskEstHours(e.target.value)}
             />
           </div>
+
+          {editingTask && (
+            <div className="p-2.5 rounded-lg bg-surface border border-border text-xs flex items-center justify-between">
+              <span className="text-text-muted flex items-center gap-1.5">
+                <Calendar className="h-3.5 w-3.5" />
+                <span>Auto-Captured Start Date (Read-only):</span>
+              </span>
+              <span className="font-semibold text-text-primary" suppressHydrationWarning>
+                {formatDateTime(editingTask.startDate || editingTask.createdAt)}
+              </span>
+            </div>
+          )}
         </form>
+      </Modal>
+
+      {/* Full Task Details Modal (opened when clicking task name) */}
+      <Modal
+        isOpen={!!viewingTask}
+        onClose={() => setViewingTask(null)}
+        title={viewingTask?.title || 'Task Details'}
+        description={`Project: ${project.name}`}
+        size="lg"
+        footer={
+          viewingTask && (
+            <>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  const t = viewingTask
+                  setViewingTask(null)
+                  handleOpenPunches(t)
+                }}
+              >
+                <History className="h-3.5 w-3.5" />
+                <span>View Punches ({viewingTask.totalLoggedMinutes || 0}m)</span>
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  const t = viewingTask
+                  setViewingTask(null)
+                  openEditTaskModal(t)
+                }}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                <span>Edit Task</span>
+              </Button>
+            </>
+          )
+        }
+      >
+        {viewingTask && (
+          <div className="space-y-4 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`px-2.5 py-0.5 rounded-full font-semibold border capitalize ${
+                  viewingTask.status === 'completed'
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                    : viewingTask.status === 'review'
+                    ? 'bg-purple-50 text-purple-800 border-purple-200'
+                    : viewingTask.status === 'in_progress'
+                    ? 'bg-blue-50 text-blue-800 border-blue-200'
+                    : viewingTask.status === 'blocked'
+                    ? 'bg-rose-50 text-rose-800 border-rose-200'
+                    : 'bg-slate-100 text-slate-700 border-slate-200'
+                }`}
+              >
+                Status: {viewingTask.status.replace('_', ' ')}
+              </span>
+              <span
+                className={`px-2.5 py-0.5 rounded-full font-medium ${getPriorityColor(
+                  viewingTask.priority,
+                )}`}
+              >
+                Priority: {getPriorityLabel(viewingTask.priority)}
+              </span>
+            </div>
+
+            <div>
+              <p className="font-semibold text-text-muted uppercase tracking-wider text-[11px] mb-1">
+                Instructions & Deliverable Description
+              </p>
+              <div className="p-3.5 rounded-xl bg-surface border border-border text-text-secondary whitespace-pre-line leading-relaxed">
+                {viewingTask.description || 'No detailed description provided for this task.'}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200">
+              <div>
+                <p className="text-text-muted">Start Date (Auto)</p>
+                <p className="font-semibold text-text-primary mt-0.5" suppressHydrationWarning>
+                  {formatDateTime(viewingTask.startDate || viewingTask.createdAt)}
+                </p>
+              </div>
+              <div>
+                <p className="text-text-muted">Due Date</p>
+                <p className="font-semibold text-text-primary mt-0.5" suppressHydrationWarning>
+                  {viewingTask.dueDate ? formatDate(viewingTask.dueDate) : 'Not set'}
+                </p>
+              </div>
+              <div>
+                <p className="text-text-muted">Est. Hours</p>
+                <p className="font-semibold text-text-primary mt-0.5">
+                  {viewingTask.estimatedHours ? `${viewingTask.estimatedHours}h` : '—'}
+                </p>
+              </div>
+              <div>
+                <p className="text-text-muted">Time Logged</p>
+                <p className="font-bold font-mono text-brand-700 mt-0.5">
+                  {viewingTask.totalLoggedMinutes || 0} mins
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <p className="font-semibold text-text-muted uppercase tracking-wider text-[11px] mb-1.5">
+                Assigned Staff ({getTaskAssigneeNames(viewingTask).length})
+              </p>
+              {getTaskAssigneeNames(viewingTask).length === 0 ? (
+                <p className="text-text-muted italic">Currently unassigned</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {getTaskAssigneeIds(viewingTask).map((empId) => {
+                    const emp = employees.find((e) => e.id === empId)
+                    return (
+                      <div
+                        key={empId}
+                        className="px-3 py-1.5 rounded-lg bg-brand-50 border border-brand-200 text-brand-900 font-medium"
+                      >
+                        {emp?.fullName || 'Team Member'}
+                        {emp?.designation ? ` • ${emp.designation}` : ''}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* View Task Punches / Work History Modal */}

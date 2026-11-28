@@ -3,16 +3,26 @@
 // app/(auth)/login/page.tsx
 // Production agency login screen connected to live backend API.
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { Mail, Lock, Eye, EyeOff, ShieldCheck } from 'lucide-react'
-import { Input, Button, Card } from '@/components/ui'
+import { Mail, Lock, Eye, EyeOff, ShieldCheck, Clock } from 'lucide-react'
+import { Input, Button, Card, PageLoader } from '@/components/ui'
 import { APP_NAME, APP_TAGLINE } from '@/lib/constants'
 import { useAuth } from '@/lib/auth-context'
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<PageLoader />}>
+      <LoginContent />
+    </Suspense>
+  )
+}
+
+function LoginContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const reason = searchParams.get('reason')
   const { login } = useAuth()
 
   const [email, setEmail] = useState('')
@@ -40,8 +50,9 @@ export default function LoginPage() {
       } else {
         router.push('/employee/dashboard')
       }
-    } catch (err: any) {
-      const errMsg = err?.message || 'Invalid email or password. Please try again.'
+    } catch (err: unknown) {
+      const errMsg =
+        err instanceof Error ? err.message : 'Invalid email or password. Please try again.'
       setError(errMsg)
     } finally {
       setIsLoading(false)
@@ -63,6 +74,28 @@ export default function LoginPage() {
           {APP_TAGLINE}
         </p>
       </div>
+
+      {/* Session Expiry Notice */}
+      {(reason === 'session_expired' || reason === 'unauthorized') && (
+        <div
+          className="mb-4 p-3.5 rounded-xl bg-warning-light border border-warning/40 text-warning-dark text-xs flex items-start gap-2.5"
+          role="status"
+        >
+          <Clock className="h-4 w-4 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="font-semibold">
+              {reason === 'session_expired'
+                ? 'Session Expired (20-Hour Security Limit)'
+                : 'Session Timed Out'}
+            </p>
+            <p className="mt-0.5 opacity-90">
+              {reason === 'session_expired'
+                ? 'Your account was automatically signed out after 20 hours. Please sign in again to continue.'
+                : 'Your authentication token is no longer active. Please sign in again.'}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Login Card */}
       <Card padding="lg" className="border-border shadow-sm bg-white">

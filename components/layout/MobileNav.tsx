@@ -12,6 +12,8 @@ import {
   Briefcase,
   Phone,
   Menu,
+  ClipboardList,
+  Clock,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -24,9 +26,11 @@ const ADMIN_MOBILE_NAV = [
 ]
 
 const EMPLOYEE_MOBILE_NAV = [
-  { label: 'Home',     href: '/employee/dashboard', icon: LayoutDashboard },
-  { label: 'Projects', href: '/employee/projects',  icon: Briefcase },
-  { label: 'Follow-ups', href: '/employee/followups', icon: Phone },
+  { label: 'Home',       href: '/employee/dashboard',       icon: LayoutDashboard },
+  { label: 'Projects',   href: '/employee/projects',        icon: Briefcase },
+  { label: 'Tasks',      href: '/employee/tasks',           icon: ClipboardList },
+  { label: 'Calls',      href: '/employee/followups',       icon: Phone },
+  { label: 'HRMS',       href: '/employee/hrms/attendance', icon: Clock },
 ]
 
 interface MobileNavProps {

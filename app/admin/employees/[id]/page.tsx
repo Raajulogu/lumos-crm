@@ -4,7 +4,7 @@
 // Employee Profile & Performance Metrics — Workload distribution, on-time delivery KPIs, and account management.
 
 import { useState, useMemo, useEffect, Suspense } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { ContentWrapper } from '@/components/layout/ContentWrapper'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -15,27 +15,16 @@ import {
   Button,
   Avatar,
   Toggle,
-  Input,
   Modal,
   PageLoader,
   CardSkeleton,
   TableSkeleton,
 } from '@/components/ui'
+import { EmployeeWorksheetSection } from '@/components/common'
 import { api } from '@/lib/api'
 import type { Employee, Project, Client, Doubt } from '@/lib/types'
 import {
-  User,
-  Mail,
-  Phone,
-  Briefcase,
-  IndianRupee,
-  Calendar,
-  CheckCircle2,
-  AlertTriangle,
-  Clock,
   ArrowLeft,
-  ChevronRight,
-  TrendingUp,
   Award,
   AlertCircle,
   Lock,
@@ -43,6 +32,8 @@ import {
   EyeOff,
   ShieldCheck,
   Check,
+  Briefcase,
+  ClipboardList,
 } from 'lucide-react'
 import {
   formatDate,
@@ -64,11 +55,15 @@ export default function AdminEmployeeDetailPage() {
 
 function AdminEmployeeDetailContent() {
   const params = useParams()
-  const router = useRouter()
+  const searchParams = useSearchParams()
   const empId = params?.id as string
+  const [activeTab, setActiveTab] = useState<'overview' | 'worksheet'>(() =>
+    searchParams.get('tab') === 'worksheet' ? 'worksheet' : 'overview',
+  )
 
   const [loading, setLoading] = useState(true)
   const [employee, setEmployee] = useState<Employee | null>(null)
+  const [allProjects, setAllProjects] = useState<Project[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [doubts, setDoubts] = useState<Doubt[]>([])
@@ -100,8 +95,10 @@ function AdminEmployeeDetailContent() {
         setIsPasswordModalOpen(false)
         setPasswordSuccess('')
       }, 1500)
-    } catch (err: any) {
-      setPasswordError(err?.message || 'Failed to update employee password.')
+    } catch (err: unknown) {
+      setPasswordError(
+        err instanceof Error ? err.message : 'Failed to update employee password.',
+      )
     } finally {
       setIsUpdatingPassword(false)
     }
@@ -109,14 +106,13 @@ function AdminEmployeeDetailContent() {
 
   useEffect(() => {
     let mounted = true
-    setLoading(true)
 
     Promise.allSettled([
       api.employees.getById(empId),
       api.projects.list({ limit: 100 }),
       api.clients.list({ limit: 100 }),
     ])
-      .then(([empRes, projRes, clientRes]) => {
+      .then(async ([empRes, projRes, clientRes]) => {
         if (!mounted) return
 
         if (empRes.status === 'fulfilled' && empRes.value) {
@@ -125,17 +121,31 @@ function AdminEmployeeDetailContent() {
           if (detail.assignedProjects) setProjects(detail.assignedProjects)
         }
 
+        let matchingProjects: Project[] = []
         if (projRes.status === 'fulfilled') {
-          const matching = (projRes.value?.projects || []).filter(
+          const allLoaded = projRes.value?.projects || []
+          setAllProjects(allLoaded)
+          matchingProjects = allLoaded.filter(
             (p) =>
               p.primaryEmployeeId === empId ||
               p.additionalMemberIds?.includes(empId),
           )
-          setProjects(matching)
+          setProjects(matchingProjects)
         }
 
         if (clientRes.status === 'fulfilled') {
           setClients(clientRes.value?.clients || [])
+        }
+
+        if (matchingProjects.length > 0) {
+          const doubtResults = await Promise.allSettled(
+            matchingProjects.map((p) => api.doubts.listByProject(p.id)),
+          )
+          if (!mounted) return
+          const empDoubts = doubtResults
+            .flatMap((res) => (res.status === 'fulfilled' ? res.value || [] : []))
+            .filter((d) => d.raisedById === empId)
+          setDoubts(empDoubts)
         }
       })
       .finally(() => {
@@ -149,7 +159,13 @@ function AdminEmployeeDetailContent() {
 
   // Lookups
   const clientMap = useMemo(
-    () => new Map((Array.isArray(clients) ? clients : []).map((c) => [c.id || (c as any)._id, c])),
+    () =>
+      new Map(
+        (Array.isArray(clients) ? clients : []).map((c) => [
+          c.id || (c as Client & { _id?: string })._id || '',
+          c,
+        ]),
+      ),
     [clients],
   )
 
@@ -287,6 +303,42 @@ function AdminEmployeeDetailContent() {
         </Card>
       </div>
 
+      {/* Section Tabs: Overview & Projects vs. Work Sheet & Task Analytics */}
+      <div className="flex flex-wrap items-center gap-2 mb-6">
+        <button
+          type="button"
+          onClick={() => setActiveTab('overview')}
+          className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold border transition-colors cursor-pointer ${
+            activeTab === 'overview'
+              ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+              : 'bg-white text-text-secondary border-border hover:bg-surface'
+          }`}
+        >
+          <Briefcase className="h-4 w-4" />
+          <span>Overview & Assigned Projects</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('worksheet')}
+          className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold border transition-colors cursor-pointer ${
+            activeTab === 'worksheet'
+              ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+              : 'bg-white text-text-secondary border-border hover:bg-surface'
+          }`}
+        >
+          <ClipboardList className="h-4 w-4" />
+          <span>Work Sheet & Task Hours</span>
+        </button>
+      </div>
+
+      {activeTab === 'worksheet' ? (
+        <EmployeeWorksheetSection
+          employeeId={employee.id}
+          employeeName={employee.fullName}
+          projects={allProjects.length > 0 ? allProjects : assignedProjects}
+          clients={clients}
+        />
+      ) : (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left (2 Cols): Assigned Projects Portfolio */}
         <div className="lg:col-span-2 space-y-6">
@@ -506,6 +558,7 @@ function AdminEmployeeDetailContent() {
           </Card>
         </div>
       </div>
+      )}
 
       {/* Change Password Modal */}
       <Modal

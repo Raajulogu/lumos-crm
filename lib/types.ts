@@ -41,6 +41,7 @@ export interface Employee {
 export interface ServiceCategory {
   id: string
   name: string
+  description?: string
   color: string            // hex color e.g. "#3b82f6"
   isDefault: boolean
   createdAt: string
@@ -92,9 +93,12 @@ export interface Project {
   serviceCategories: string[]      // array of ServiceCategory IDs
   description: string
   budget: number                   // agreed price in ₹
+  agreedBudget?: number            // backend alias support
   actualCost?: number              // optional, filled later
+  incurredCost?: number            // backend alias support
   startDate: string                // ISO date string
   deliveryDate: string             // ISO date string (deadline)
+  deadlineStatus?: string          // custom deadline status label
   priority: ProjectPriority
   status: ProjectStatus
   primaryEmployeeId?: string
@@ -137,9 +141,23 @@ export interface Note {
   createdAt: string
 }
 
-// ─── Follow-Ups ──────────────────────────────────────────────
+// ─── Follow-Ups & Evaluations ─────────────────────────────────
 
 export type FollowUpStatus = 'pending' | 'done' | 'missed'
+
+export interface FollowUpEvaluation {
+  id: string
+  followupId: string
+  projectId?: string
+  userId?: string
+  employeeName?: string
+  rating: number           // 1 to 5
+  properlyCompleted: boolean
+  comments: string
+  adminReviewStatus?: 'pending' | 'approved' | 'needs_followup'
+  adminReviewNotes?: string
+  createdAt: string
+}
 
 export interface FollowUp {
   id: string
@@ -150,6 +168,9 @@ export interface FollowUp {
   assignedToName: string   // display name
   notes?: string
   status: FollowUpStatus
+  isVisibleToEmployee?: boolean
+  hideDetailsFromEmployee?: boolean
+  evaluation?: FollowUpEvaluation | null
   createdAt: string
 }
 
@@ -273,25 +294,33 @@ export interface CreateEmployeePayload {
 export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'completed' | 'blocked'
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent'
 
+export interface TaskAssigneeSummary {
+  id: string
+  fullName: string
+  email?: string
+  designation?: string
+}
+
 export interface ProjectTask {
   id: string
   projectId: string
   projectName?: string
+  clientName?: string
   title: string
   description?: string
+  startDate?: string       // Auto-captured creation/start timestamp
   assignedToId?: string | null
-  assignedTo?: {
-    id: string
-    fullName: string
-    email?: string
-    designation?: string
-  } | null
+  assignedTo?: TaskAssigneeSummary | null
+  assigneeIds?: string[]
+  assignees?: TaskAssigneeSummary[]
   status: TaskStatus
   priority: TaskPriority
   dueDate?: string
   estimatedHours?: number
   totalLoggedMinutes?: number
   totalPunchesCount?: number
+  autoClosedAt?: string
+  autoCloseUpdateText?: string
   createdAt: string
   updatedAt: string
 }
@@ -309,6 +338,7 @@ export interface TaskPunch {
   durationSeconds?: number
   statusAtStop?: TaskStatus
   notes?: string
+  autoPunched?: boolean
   createdAt: string
 }
 
@@ -316,8 +346,10 @@ export interface CreateTaskPayload {
   title: string
   description?: string
   assignedToId?: string | null
+  assigneeIds?: string[]
   priority?: TaskPriority
   status?: TaskStatus
+  startDate?: string
   dueDate?: string
   estimatedHours?: number
 }
@@ -326,8 +358,10 @@ export interface UpdateTaskPayload {
   title?: string
   description?: string
   assignedToId?: string | null
+  assigneeIds?: string[]
   priority?: TaskPriority
   status?: TaskStatus
+  startDate?: string
   dueDate?: string
   estimatedHours?: number
 }
@@ -335,20 +369,118 @@ export interface UpdateTaskPayload {
 export interface PunchOutPayload {
   statusAtStop: TaskStatus
   notes?: string
+  autoPunched?: boolean
 }
 
-// ─── Daily Shift Attendance ───────────────────────────────────
+export interface EmployeeWorksheetTaskItem {
+  taskId: string
+  title: string
+  projectId: string
+  projectName?: string
+  clientName?: string
+  status: TaskStatus
+  priority: TaskPriority
+  startDate?: string
+  dueDate?: string
+  estimatedHours?: number
+  workedSeconds: number
+  workedHours: number
+  punchCount: number
+  lastWorkedAt?: string
+  autoClosedAt?: string
+  autoCloseUpdateText?: string
+}
+
+export interface EmployeeWorksheetSummary {
+  totalWorkedSeconds: number
+  totalWorkedHours: number
+  totalTasksAssigned: number
+  tasksCompleted: number
+  tasksInProgress: number
+  tasksTodo: number
+  totalPunchSessions: number
+  autoPunchedCount: number
+}
+
+export interface EmployeeWorksheet {
+  employee?: {
+    id: string
+    fullName: string
+    email?: string
+    designation?: string
+    payType?: PayType
+  }
+  range?: {
+    from?: string
+    to?: string
+  }
+  summary: EmployeeWorksheetSummary
+  tasks: EmployeeWorksheetTaskItem[]
+  punches: TaskPunch[]
+}
+
+// ─── Daily Shift Attendance & HRMS ────────────────────────────
 
 export interface AttendanceRecord {
   id: string
   employeeId: string
   employeeName?: string
+  employeeDesignation?: string
   clockInTime: string
   clockOutTime?: string
   durationMinutes?: number
   date: string // YYYY-MM-DD
   status: 'clocked_in' | 'clocked_out'
   createdAt: string
+}
+
+export type LeaveType = 'casual' | 'sick' | 'earned' | 'unpaid'
+export type HrmsRequestStatus = 'pending' | 'approved' | 'rejected'
+
+export interface LeaveRequest {
+  id: string
+  userId: string
+  employeeName?: string
+  employeeEmail?: string
+  employeeDesignation?: string
+  startDate: string
+  endDate: string
+  type: LeaveType
+  reason: string
+  status: HrmsRequestStatus
+  reviewedBy?: string
+  reviewedAt?: string
+  reviewNotes?: string
+  createdAt: string
+}
+
+export type PermissionType = 'late_arrival' | 'early_exit' | 'short_break' | 'official_errand'
+
+export interface PermissionRequest {
+  id: string
+  userId: string
+  employeeName?: string
+  employeeEmail?: string
+  employeeDesignation?: string
+  date: string
+  type: PermissionType
+  fromTime?: string
+  toTime?: string
+  reason: string
+  status: HrmsRequestStatus
+  reviewedBy?: string
+  reviewedAt?: string
+  reviewNotes?: string
+  createdAt: string
+}
+
+export interface HrmsMailRecord {
+  id: string
+  to: string
+  subject: string
+  html: string
+  sentAt: string
+  status: 'sent' | 'queued'
 }
 
 export interface UpdateEmployeePasswordPayload {

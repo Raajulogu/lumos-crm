@@ -2,7 +2,7 @@
 
 // components/layout/Sidebar.tsx
 import { Suspense, useState, useEffect } from 'react'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
   LayoutDashboard,
@@ -14,10 +14,16 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   X,
   LogOut,
   LogIn,
   Clock,
+  ClipboardList,
+  Plus,
+  CalendarOff,
+  FileCheck,
+  Mail,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { APP_NAME } from '@/lib/constants'
@@ -33,28 +39,61 @@ const ICON_MAP = {
   UserCheck,
   BarChart2,
   Settings,
+  ClipboardList,
+  Clock,
+  CalendarOff,
+  FileCheck,
+  Mail,
+}
+
+interface SubNavItem {
+  label: string
+  href: string
+  icon?: keyof typeof ICON_MAP
+  isAction?: boolean
 }
 
 interface NavItem {
   label: string
   href: string
   icon: keyof typeof ICON_MAP
+  children?: SubNavItem[]
 }
 
 const ADMIN_NAV: NavItem[] = [
-  { label: 'Dashboard',  href: '/admin/dashboard',  icon: 'LayoutDashboard' },
-  { label: 'Clients',    href: '/admin/clients',    icon: 'Users' },
-  { label: 'Projects',   href: '/admin/projects',   icon: 'Briefcase' },
-  { label: 'Follow-ups', href: '/admin/followups',  icon: 'Phone' },
-  { label: 'Employees',  href: '/admin/employees',  icon: 'UserCheck' },
-  { label: 'Analytics',  href: '/admin/analytics',  icon: 'BarChart2' },
-  { label: 'Settings',   href: '/admin/settings',   icon: 'Settings' },
+  { label: 'Dashboard',    href: '/admin/dashboard',  icon: 'LayoutDashboard' },
+  { label: 'Clients',      href: '/admin/clients',    icon: 'Users' },
+  { label: 'Projects',     href: '/admin/projects',   icon: 'Briefcase' },
+  { label: 'Follow-ups',   href: '/admin/followups',  icon: 'Phone' },
+  { label: 'Employees',    href: '/admin/employees',  icon: 'UserCheck' },
+  { label: 'HRMS & Leave', href: '/admin/hrms',       icon: 'CalendarOff' },
+  { label: 'Analytics',    href: '/admin/analytics',  icon: 'BarChart2' },
+  { label: 'Settings',     href: '/admin/settings',   icon: 'Settings' },
 ]
 
 const EMPLOYEE_NAV: NavItem[] = [
   { label: 'Dashboard',   href: '/employee/dashboard',  icon: 'LayoutDashboard' },
   { label: 'My Projects', href: '/employee/projects',   icon: 'Briefcase' },
+  {
+    label: 'Tasks',
+    href: '/employee/tasks',
+    icon: 'ClipboardList',
+    children: [
+      { label: 'Add Task', href: '/employee/tasks?action=add', isAction: true },
+    ],
+  },
   { label: 'Follow-ups',  href: '/employee/followups',  icon: 'Phone' },
+  {
+    label: 'HRMS',
+    href: '/employee/hrms/attendance',
+    icon: 'Users',
+    children: [
+      { label: 'Attendance', href: '/employee/hrms/attendance', icon: 'Clock' },
+      { label: 'Leave',      href: '/employee/hrms/leave',      icon: 'CalendarOff' },
+      { label: 'Permission', href: '/employee/hrms/permission', icon: 'FileCheck' },
+      { label: 'Send Mail',  href: '/employee/hrms/mail',       icon: 'Mail' },
+    ],
+  },
 ]
 
 interface SidebarProps {
@@ -75,32 +114,130 @@ function SidebarNavLinks({
   onClose?: () => void
 }) {
   const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const [hrmsExpanded, setHrmsExpanded] = useState(true)
 
   return (
-    <nav className="flex-1 py-4 px-2 space-y-0.5" aria-label="Main navigation">
+    <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-1" aria-label="Main navigation">
       {navItems.map((item) => {
         const Icon = ICON_MAP[item.icon]
-        const isActive =
-          pathname === item.href || pathname?.startsWith(item.href + '/')
+        const isHrms = item.label === 'HRMS'
+        const isActive = isHrms
+          ? pathname?.startsWith('/employee/hrms')
+          : pathname === item.href || pathname?.startsWith(item.href + '/')
+
+        if (isHrms) {
+          return (
+            <div key={item.label} className="pt-1">
+              {isCollapsed ? (
+                <Link
+                  href={item.href}
+                  onClick={onClose}
+                  title="HRMS"
+                  className={cn(
+                    'flex items-center justify-center px-0 py-2.5 rounded-lg text-sm font-medium transition-colors duration-150',
+                    isActive
+                      ? 'bg-sidebar-active text-white'
+                      : 'text-sidebar-text hover:bg-sidebar-hover hover:text-sidebar-text-active',
+                  )}
+                >
+                  <Icon className="h-5 w-5 flex-shrink-0" />
+                </Link>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setHrmsExpanded((v) => !v)}
+                    className={cn(
+                      'w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold transition-colors duration-150 cursor-pointer',
+                      isActive
+                        ? 'text-white bg-sidebar-hover'
+                        : 'text-sidebar-text hover:bg-sidebar-hover hover:text-sidebar-text-active',
+                    )}
+                    aria-expanded={hrmsExpanded}
+                  >
+                    <span className="flex items-center gap-3">
+                      <Icon className="h-5 w-5 flex-shrink-0" />
+                      <span>{item.label}</span>
+                    </span>
+                    <ChevronDown
+                      className={cn(
+                        'h-4 w-4 transition-transform duration-150',
+                        hrmsExpanded && 'rotate-180',
+                      )}
+                    />
+                  </button>
+
+                  {hrmsExpanded && item.children && (
+                    <div className="mt-1 ml-4 pl-3 border-l border-sidebar-border space-y-0.5">
+                      {item.children.map((sub) => {
+                        const SubIcon = sub.icon ? ICON_MAP[sub.icon] : null
+                        const subActive = pathname === sub.href
+                        return (
+                          <Link
+                            key={sub.href}
+                            href={sub.href}
+                            onClick={onClose}
+                            className={cn(
+                              'flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors duration-150',
+                              subActive
+                                ? 'bg-sidebar-active text-white'
+                                : 'text-sidebar-text hover:bg-sidebar-hover hover:text-sidebar-text-active',
+                            )}
+                          >
+                            {SubIcon && <SubIcon className="h-4 w-4 flex-shrink-0" />}
+                            <span>{sub.label}</span>
+                          </Link>
+                        )
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )
+        }
 
         return (
-          <Link
-            key={item.href}
-            href={item.href}
-            onClick={onClose}
-            className={cn(
-              'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium',
-              'transition-colors duration-150',
-              isCollapsed && 'justify-center px-0',
-              isActive
-                ? 'bg-sidebar-active text-white'
-                : 'text-sidebar-text hover:bg-sidebar-hover hover:text-sidebar-text-active',
-            )}
-            title={isCollapsed ? item.label : undefined}
-          >
-            <Icon className="h-5 w-5 flex-shrink-0" />
-            {!isCollapsed && <span>{item.label}</span>}
-          </Link>
+          <div key={item.href}>
+            <div className="flex items-center gap-1">
+              <Link
+                href={item.href}
+                onClick={onClose}
+                className={cn(
+                  'flex-1 flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium',
+                  'transition-colors duration-150',
+                  isCollapsed && 'justify-center px-0',
+                  isActive
+                    ? 'bg-sidebar-active text-white'
+                    : 'text-sidebar-text hover:bg-sidebar-hover hover:text-sidebar-text-active',
+                )}
+                title={isCollapsed ? item.label : undefined}
+              >
+                <Icon className="h-5 w-5 flex-shrink-0" />
+                {!isCollapsed && <span>{item.label}</span>}
+              </Link>
+
+              {!isCollapsed &&
+                item.children?.map((sub) => (
+                  <Link
+                    key={sub.href}
+                    href={sub.href}
+                    onClick={onClose}
+                    title={sub.label}
+                    className={cn(
+                      'inline-flex items-center gap-1 px-2 py-1.5 rounded-md text-[11px] font-semibold transition-colors whitespace-nowrap',
+                      searchParams.get('action') === 'add' && pathname === item.href
+                        ? 'bg-brand-500 text-white'
+                        : 'bg-sidebar-hover text-brand-300 hover:text-white hover:bg-brand-600/80',
+                    )}
+                  >
+                    <Plus className="h-3 w-3" />
+                    <span>{sub.label}</span>
+                  </Link>
+                ))}
+            </div>
+          </div>
         )
       })}
     </nav>
@@ -126,23 +263,27 @@ export function Sidebar({
 
   useEffect(() => {
     let mounted = true
-    api.attendance
-      .getStatus()
-      .then((status) => {
-        if (!mounted) return
-        setIsClockedIn(status.isClockedIn)
-        setShiftRecord(status.currentRecord || null)
-      })
-      .catch(() => {})
+    const syncShift = () => {
+      api.attendance
+        .getStatus()
+        .then((status) => {
+          if (!mounted) return
+          setIsClockedIn(status.isClockedIn)
+          setShiftRecord(status.currentRecord || null)
+        })
+        .catch(() => {})
+    }
+    syncShift()
+    window.addEventListener('crm_attendance_change', syncShift)
 
     return () => {
       mounted = false
+      window.removeEventListener('crm_attendance_change', syncShift)
     }
   }, [currentUser.id])
 
   useEffect(() => {
     if (!isClockedIn || !shiftRecord?.clockInTime) {
-      setShiftElapsedSeconds(0)
       return
     }
 
@@ -152,9 +293,12 @@ export function Sidebar({
       setShiftElapsedSeconds(diff)
     }
 
-    updateTimer()
+    const initialTimer = setTimeout(updateTimer, 0)
     const interval = setInterval(updateTimer, 1000)
-    return () => clearInterval(interval)
+    return () => {
+      clearTimeout(initialTimer)
+      clearInterval(interval)
+    }
   }, [isClockedIn, shiftRecord])
 
   async function handleClockIn() {
@@ -163,6 +307,9 @@ export function Sidebar({
       const rec = await api.attendance.clockIn()
       setShiftRecord(rec)
       setIsClockedIn(true)
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('crm_attendance_change'))
+      }
     } finally {
       setIsPunchingAttendance(false)
     }
@@ -174,6 +321,10 @@ export function Sidebar({
       const rec = await api.attendance.clockOut()
       setShiftRecord(rec)
       setIsClockedIn(false)
+      setShiftElapsedSeconds(0)
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('crm_attendance_change'))
+      }
     } finally {
       setIsPunchingAttendance(false)
     }
@@ -346,7 +497,11 @@ export function Sidebar({
             type="button"
             onClick={isClockedIn ? handleClockOut : handleClockIn}
             disabled={isPunchingAttendance}
-            title={isClockedIn ? `Clocked In (${formatShiftTime(shiftElapsedSeconds)}) - Click to Punch Out` : 'Punch In (Start Shift)'}
+            title={
+              isClockedIn
+                ? `Clocked In (${formatShiftTime(shiftElapsedSeconds)}) - Click to Punch Out`
+                : 'Punch In (Start Shift)'
+            }
             className={`p-2 rounded-lg transition-colors cursor-pointer ${
               isClockedIn
                 ? 'bg-emerald-600 text-white'

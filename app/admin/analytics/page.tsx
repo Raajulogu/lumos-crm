@@ -14,8 +14,6 @@ import {
   Button,
   PageLoader,
   MetricCardSkeleton,
-  CardSkeleton,
-  EmptyState,
 } from '@/components/ui'
 import { api } from '@/lib/api'
 import type {
@@ -23,25 +21,15 @@ import type {
   Client,
   Employee,
   ServiceCategory,
-  FollowUp,
   Doubt,
+  EmployeePerformance,
 } from '@/lib/types'
 import {
   TrendingUp,
-  DollarSign,
-  Briefcase,
-  Users,
   Award,
-  Calendar,
-  CheckCircle2,
-  AlertTriangle,
-  ArrowUpRight,
-  PieChart,
-  BarChart2,
-  Phone,
   AlertCircle,
 } from 'lucide-react'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency } from '@/lib/utils'
 
 export default function AdminAnalyticsPage() {
   return (
@@ -60,25 +48,27 @@ function AdminAnalyticsContent() {
   const [clients, setClients] = useState<Client[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
   const [categories, setCategories] = useState<ServiceCategory[]>([])
-  const [followups, setFollowups] = useState<FollowUp[]>([])
+  const [openDoubts, setOpenDoubts] = useState<Doubt[]>([])
+  const [doubtsLoaded, setDoubtsLoaded] = useState(false)
+  const [overviewLeaderboard, setOverviewLeaderboard] = useState<EmployeePerformance[]>([])
 
   useEffect(() => {
     let mounted = true
-    setLoading(true)
-    setError(null)
 
     Promise.allSettled([
       api.projects.list({ limit: 100 }),
       api.clients.list({ limit: 100 }),
       api.employees.list(),
       api.settings.getCategories(),
-      api.followups.list({ limit: 100 }),
     ])
-      .then(([projRes, clientRes, empRes, catRes, fuRes]) => {
+      .then(async ([projRes, clientRes, empRes, catRes]) => {
         if (!mounted) return
 
+        const loadedProjects =
+          projRes.status === 'fulfilled' ? projRes.value?.projects || [] : []
+
         if (projRes.status === 'fulfilled') {
-          setProjects(projRes.value?.projects || [])
+          setProjects(loadedProjects)
         } else {
           setError('Failed to fetch agency financial metrics from server')
         }
@@ -86,7 +76,20 @@ function AdminAnalyticsContent() {
         if (clientRes.status === 'fulfilled') setClients(clientRes.value?.clients || [])
         if (empRes.status === 'fulfilled') setEmployees(empRes.value || [])
         if (catRes.status === 'fulfilled') setCategories(catRes.value || [])
-        if (fuRes.status === 'fulfilled') setFollowups(fuRes.value?.followups || [])
+
+        if (loadedProjects.length > 0) {
+          const doubtResults = await Promise.allSettled(
+            loadedProjects.map((p) => api.doubts.listByProject(p.id, 'open')),
+          )
+          if (!mounted) return
+          const allOpenDoubts = doubtResults.flatMap((res) =>
+            res.status === 'fulfilled' ? res.value || [] : [],
+          )
+          setOpenDoubts(allOpenDoubts)
+          setDoubtsLoaded(doubtResults.some((res) => res.status === 'fulfilled'))
+        } else {
+          setDoubtsLoaded(true)
+        }
       })
       .finally(() => {
         if (mounted) setLoading(false)
@@ -96,6 +99,21 @@ function AdminAnalyticsContent() {
       mounted = false
     }
   }, [])
+
+  useEffect(() => {
+    let mounted = true
+    api.analytics
+      .getOverview(timeRange)
+      .then((overview) => {
+        if (!mounted || !overview?.employeeLeaderboard) return
+        setOverviewLeaderboard(overview.employeeLeaderboard)
+      })
+      .catch(() => {})
+
+    return () => {
+      mounted = false
+    }
+  }, [timeRange])
 
   // Financial calculations from real projects
   const totalRevenue = useMemo(() => {
@@ -155,19 +173,27 @@ function AdminAnalyticsContent() {
   const categoryStats = useMemo(() => {
     const map = new Map<string, { count: number; totalBudget: number }>()
     ;(Array.isArray(categories) ? categories : []).forEach((c) => {
-      map.set(c.id || (c as any)._id, { count: 0, totalBudget: 0 })
+      const catKey = c.id || (c as ServiceCategory & { _id?: string })._id
+      if (catKey) {
+        map.set(catKey, { count: 0, totalBudget: 0 })
+      }
     })
 
     ;(Array.isArray(projects) ? projects : []).forEach((p) => {
       if (!p || !Array.isArray(p.serviceCategories)) return
-      p.serviceCategories.forEach((catItem: any) => {
-        const catId = typeof catItem === 'object' && catItem !== null ? catItem.id || catItem._id : catItem
-        const existing = map.get(catId)
-        if (existing) {
-          existing.count += 1
-          existing.totalBudget += (Number(p.budget) || 0) / (p.serviceCategories.length || 1)
-        }
-      })
+      p.serviceCategories.forEach(
+        (catItem: string | { id?: string; _id?: string }) => {
+          const catId =
+            typeof catItem === 'object' && catItem !== null
+              ? catItem.id || catItem._id
+              : catItem
+          const existing = catId ? map.get(catId) : undefined
+          if (existing) {
+            existing.count += 1
+            existing.totalBudget += (Number(p.budget) || 0) / (p.serviceCategories.length || 1)
+          }
+        },
+      )
     })
 
     return (Array.isArray(categories) ? categories : []).map((c) => ({
@@ -217,33 +243,50 @@ function AdminAnalyticsContent() {
 
   // Employee Performance Leaderboard
   const employeePerformance = useMemo(() => {
+    const openDoubtsByEmployee = new Map<string, number>()
+    openDoubts.forEach((d) => {
+      if (d.status && d.status !== 'open') return
+      const doubtWithAlias = d as unknown as {
+        raisedById?: string | { id?: string; _id?: string }
+        raisedBy?: string | { id?: string; _id?: string }
+      }
+      const rawRaised = doubtWithAlias.raisedById ?? doubtWithAlias.raisedBy
+      const raisedId =
+        typeof rawRaised === 'object' && rawRaised !== null
+          ? String(rawRaised.id || rawRaised._id || '')
+          : String(rawRaised || '')
+      if (raisedId) {
+        openDoubtsByEmployee.set(raisedId, (openDoubtsByEmployee.get(raisedId) || 0) + 1)
+      }
+    })
+
     return employees.map((emp) => {
       const assigned = projects.filter(
         (p) =>
           p.primaryEmployeeId === emp.id || p.additionalMemberIds?.includes(emp.id),
       )
-      const delivered = assigned.filter((p) => p.status === 'delivered')
-      const totalBudgetHandled = assigned.reduce((sum, p) => sum + p.budget, 0)
+      const delivered = assigned.filter(
+        (p) => p.status === 'delivered' || p.status === 'completed',
+      )
       const onTimeRate =
-        assigned.length > 0 ? Math.round((delivered.length / assigned.length) * 100) : 100
+        assigned.length > 0 ? Math.round((delivered.length / assigned.length) * 100) : 0
+      const overviewEntry = overviewLeaderboard.find((o) => o.employeeId === emp.id)
+      const openDoubtsCount = doubtsLoaded
+        ? openDoubtsByEmployee.get(emp.id) || 0
+        : overviewEntry?.openDoubts ?? 0
 
       return {
         id: emp.id,
         name: emp.fullName,
         designation: emp.designation,
+        status: emp.status,
         totalProjects: assigned.length,
         deliveredCount: delivered.length,
-        totalBudgetHandled,
         onTimeRate,
+        openDoubtsCount,
       }
     })
-  }, [employees, projects])
-
-  // Follow-up Completion Rate from real followups
-  const totalFollowups = followups.length
-  const completedFollowups = followups.filter((f) => f.status === 'done').length
-  const followUpRate =
-    totalFollowups > 0 ? Math.round((completedFollowups / totalFollowups) * 100) : 0
+  }, [employees, projects, openDoubts, doubtsLoaded, overviewLeaderboard])
 
   return (
     <ContentWrapper>
@@ -494,17 +537,25 @@ function AdminAnalyticsContent() {
               {employeePerformance.map((emp) => (
                 <tr key={emp.id} className="hover:bg-surface/60">
                   <td className="px-4 py-3 font-semibold text-text-primary">
-                    <Link
-                      href={`/admin/employees/${emp.id}`}
-                      className="hover:text-brand-600"
-                    >
-                      {emp.name}
-                    </Link>
+                    <div className="flex items-center justify-between gap-2">
+                      <Link
+                        href={`/admin/employees/${emp.id}`}
+                        className="hover:text-brand-600"
+                      >
+                        {emp.name}
+                      </Link>
+                      <Link
+                        href={`/admin/employees/${emp.id}?tab=worksheet`}
+                        className="text-[11px] font-medium text-brand-600 hover:underline whitespace-nowrap"
+                      >
+                        Worksheet →
+                      </Link>
+                    </div>
                   </td>
                   <td className="px-3 py-3 text-text-muted">{emp.designation}</td>
                   <td className="px-3 py-3 text-center capitalize">
-                    <Badge variant="blue" size="sm">
-                      Active
+                    <Badge variant={emp.status === 'active' ? 'blue' : 'gray'} size="sm">
+                      {emp.status === 'active' ? 'Active' : 'Inactive'}
                     </Badge>
                   </td>
                   <td className="px-3 py-3 text-center font-semibold text-text-primary">
@@ -519,9 +570,13 @@ function AdminAnalyticsContent() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <span className="font-semibold text-text-primary">
-                      {formatCurrency(emp.totalBudgetHandled)}
-                    </span>
+                    {emp.openDoubtsCount > 0 ? (
+                      <Badge variant="amber" size="sm">
+                        {emp.openDoubtsCount}
+                      </Badge>
+                    ) : (
+                      <span className="font-semibold text-text-muted">0</span>
+                    )}
                   </td>
                 </tr>
               ))}

@@ -21,26 +21,27 @@ import {
 } from '@/components/ui'
 import { SearchBar, FilterBar, Pagination } from '@/components/common'
 import { api } from '@/lib/api'
-import type { FollowUp, Client, Project, Employee, FollowUpStatus } from '@/lib/types'
+import type {
+  FollowUp,
+  FollowUpEvaluation,
+  Client,
+  Project,
+  Employee,
+  FollowUpStatus,
+} from '@/lib/types'
 import {
   Phone,
-  Calendar,
   Clock,
-  CheckCircle2,
-  AlertTriangle,
-  Building2,
-  Briefcase,
-  User,
   Plus,
   Check,
   RotateCcw,
   AlertCircle,
+  Star,
+  Eye,
+  EyeOff,
+  ClipboardCheck,
 } from 'lucide-react'
-import {
-  formatDate,
-  formatDateTime,
-  generateId,
-} from '@/lib/utils'
+import { formatDateTime, generateId } from '@/lib/utils'
 
 export default function AdminFollowUpsPage() {
   return (
@@ -70,19 +71,27 @@ function AdminFollowUpsContent() {
   const [modalDate, setModalDate] = useState('')
   const [modalAssignee, setModalAssignee] = useState('admin')
   const [modalNotes, setModalNotes] = useState('')
+  const [modalVisibleToEmployee, setModalVisibleToEmployee] = useState(true)
+  const [modalHideDetails, setModalHideDetails] = useState(false)
+
+  // Evaluations Review State
+  const [evaluationsMap, setEvaluationsMap] = useState<Map<string, FollowUpEvaluation>>(new Map())
+  const [reviewingFollowUp, setReviewingFollowUp] = useState<FollowUp | null>(null)
+  const [adminReviewStatus, setAdminReviewStatus] = useState<'pending' | 'approved' | 'needs_followup'>('approved')
+  const [adminReviewNotes, setAdminReviewNotes] = useState('')
+  const [isSavingReview, setIsSavingReview] = useState(false)
 
   useEffect(() => {
     let mounted = true
-    setLoading(true)
-    setError(null)
 
     Promise.allSettled([
       api.followups.list({ limit: 100 }),
       api.clients.list({ limit: 100 }),
       api.projects.list({ limit: 100 }),
       api.employees.list(),
+      api.followups.getEvaluations(),
     ])
-      .then(([fuRes, clientRes, projRes, empRes]) => {
+      .then(([fuRes, clientRes, projRes, empRes, evalRes]) => {
         if (!mounted) return
 
         if (fuRes.status === 'fulfilled') {
@@ -94,6 +103,11 @@ function AdminFollowUpsContent() {
         if (clientRes.status === 'fulfilled') setClients(clientRes.value?.clients || [])
         if (projRes.status === 'fulfilled') setProjects(projRes.value?.projects || [])
         if (empRes.status === 'fulfilled') setEmployees(empRes.value || [])
+        if (evalRes.status === 'fulfilled') {
+          const map = new Map<string, FollowUpEvaluation>()
+          ;(evalRes.value || []).forEach((ev) => map.set(ev.followupId, ev))
+          setEvaluationsMap(map)
+        }
       })
       .finally(() => {
         if (mounted) setLoading(false)
@@ -135,7 +149,7 @@ function AdminFollowUpsContent() {
     e.preventDefault()
     if (!modalDate || !modalClientId) return
 
-    const newFU = {
+    const newFU: FollowUp = {
       id: `fu-${generateId()}`,
       projectId: modalProjectId || clientProjects[0]?.id || '',
       clientId: modalClientId,
@@ -147,6 +161,8 @@ function AdminFollowUpsContent() {
           : employeeMap.get(modalAssignee)?.fullName || 'Staff',
       notes: modalNotes.trim() || undefined,
       status: 'pending' as const,
+      isVisibleToEmployee: modalVisibleToEmployee,
+      hideDetailsFromEmployee: modalHideDetails,
       createdAt: new Date().toISOString(),
     }
 
@@ -156,6 +172,8 @@ function AdminFollowUpsContent() {
     setModalNotes('')
     setModalClientId('')
     setModalProjectId('')
+    setModalVisibleToEmployee(true)
+    setModalHideDetails(false)
 
     try {
       await api.followups.create({
@@ -164,8 +182,54 @@ function AdminFollowUpsContent() {
         scheduledAt: newFU.scheduledAt,
         assignedToId: newFU.assignedToId,
         notes: newFU.notes,
+        isVisibleToEmployee: newFU.isVisibleToEmployee,
+        hideDetailsFromEmployee: newFU.hideDetailsFromEmployee,
       })
     } catch {}
+  }
+
+  async function toggleEmployeeVisibility(item: FollowUp) {
+    const nextVisible = item.isVisibleToEmployee === false
+    setFollowups((prev) =>
+      prev.map((f) => (f.id === item.id ? { ...f, isVisibleToEmployee: nextVisible } : f)),
+    )
+    try {
+      await api.followups.updateVisibility(item.id, { isVisibleToEmployee: nextVisible })
+    } catch {}
+  }
+
+  function openReviewModal(item: FollowUp) {
+    const ev = item.evaluation || evaluationsMap.get(item.id) || null
+    setReviewingFollowUp({ ...item, evaluation: ev })
+    setAdminReviewStatus(ev?.adminReviewStatus || 'approved')
+    setAdminReviewNotes(ev?.adminReviewNotes || '')
+  }
+
+  async function handleSaveAdminReview(e: React.FormEvent) {
+    e.preventDefault()
+    if (!reviewingFollowUp) return
+    setIsSavingReview(true)
+    try {
+      const updated = await api.followups.reviewEvaluation(reviewingFollowUp.id, {
+        adminReviewStatus,
+        adminReviewNotes: adminReviewNotes.trim() || undefined,
+      })
+      if (updated) {
+        setEvaluationsMap((prev) => {
+          const next = new Map(prev)
+          next.set(reviewingFollowUp.id, updated)
+          return next
+        })
+        setFollowups((prev) =>
+          prev.map((f) =>
+            f.id === reviewingFollowUp.id ? { ...f, evaluation: updated } : f,
+          ),
+        )
+      }
+      setReviewingFollowUp(null)
+    } finally {
+      setIsSavingReview(false)
+    }
   }
 
   // Filtered dataset
@@ -378,7 +442,8 @@ function AdminFollowUpsContent() {
                   <th scope="col" className="px-4 py-3.5">Client & Contact</th>
                   <th scope="col" className="px-4 py-3.5">Associated Project</th>
                   <th scope="col" className="px-4 py-3.5">Owner</th>
-                  <th scope="col" className="px-4 py-3.5">Notes</th>
+                  <th scope="col" className="px-4 py-3.5">Visibility</th>
+                  <th scope="col" className="px-4 py-3.5">Evaluation</th>
                   <th scope="col" className="px-4 py-3.5 text-center">Status</th>
                   <th scope="col" className="px-5 py-3.5 text-right">Action</th>
                 </tr>
@@ -387,6 +452,8 @@ function AdminFollowUpsContent() {
                 {paginatedFollowups.map((item) => {
                   const client = clientMap.get(item.clientId)
                   const proj = projectMap.get(item.projectId)
+                  const evaluation = item.evaluation || evaluationsMap.get(item.id)
+                  const isVisible = item.isVisibleToEmployee !== false
 
                   return (
                     <tr
@@ -398,6 +465,11 @@ function AdminFollowUpsContent() {
                           <Clock className="h-3.5 w-3.5 text-text-muted" />
                           <span>{formatDateTime(item.scheduledAt)}</span>
                         </div>
+                        {item.notes && (
+                          <p className="text-[11px] font-normal text-text-muted mt-1 max-w-[200px] truncate">
+                            {item.notes}
+                          </p>
+                        )}
                       </td>
 
                       <td className="px-4 py-3.5">
@@ -429,8 +501,36 @@ function AdminFollowUpsContent() {
                         {item.assignedToName}
                       </td>
 
-                      <td className="px-4 py-3.5 text-xs text-text-secondary max-w-xs truncate">
-                        {item.notes || '—'}
+                      <td className="px-4 py-3.5 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => toggleEmployeeVisibility(item)}
+                          className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px] font-medium cursor-pointer transition-colors ${
+                            isVisible
+                              ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+                              : 'bg-slate-100 border-slate-300 text-slate-600 hover:bg-slate-200'
+                          }`}
+                          title="Toggle whether employee can view this follow-up"
+                        >
+                          {isVisible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                          <span>{isVisible ? 'Visible' : 'Hidden'}</span>
+                        </button>
+                      </td>
+
+                      <td className="px-4 py-3.5 text-xs">
+                        {evaluation ? (
+                          <button
+                            type="button"
+                            onClick={() => openReviewModal(item)}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-brand-50 border border-brand-200 text-brand-700 hover:bg-brand-100 font-semibold cursor-pointer"
+                          >
+                            <Star className="h-3 w-3 fill-amber-400 text-amber-500" />
+                            <span>{evaluation.rating}/5</span>
+                            <span className="text-[10px] font-normal opacity-80">• Review</span>
+                          </button>
+                        ) : (
+                          <span className="text-[11px] text-text-muted">Not evaluated</span>
+                        )}
                       </td>
 
                       <td className="px-4 py-3.5 text-center">
@@ -442,14 +542,26 @@ function AdminFollowUpsContent() {
                         </Badge>
                       </td>
 
-                      <td className="px-5 py-3.5 text-right">
-                        <Button
-                          variant={item.status === 'done' ? 'secondary' : 'primary'}
-                          size="sm"
-                          onClick={() => toggleFollowupStatus(item.id)}
-                        >
-                          {item.status === 'done' ? 'Reopen' : 'Mark Done'}
-                        </Button>
+                      <td className="px-5 py-3.5 text-right whitespace-nowrap">
+                        <div className="inline-flex items-center gap-1.5">
+                          {evaluation && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openReviewModal(item)}
+                              title="Review Call Evaluation"
+                            >
+                              <ClipboardCheck className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                          <Button
+                            variant={item.status === 'done' ? 'secondary' : 'primary'}
+                            size="sm"
+                            onClick={() => toggleFollowupStatus(item.id)}
+                          >
+                            {item.status === 'done' ? 'Reopen' : 'Mark Done'}
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   )
@@ -567,7 +679,139 @@ function AdminFollowUpsContent() {
             onChange={(e) => setModalNotes(e.target.value)}
             rows={3}
           />
+
+          <div className="p-3 rounded-xl bg-surface border border-border space-y-2 text-xs">
+            <p className="font-semibold text-text-primary flex items-center gap-1.5">
+              {modalVisibleToEmployee ? (
+                <Eye className="h-3.5 w-3.5 text-brand-600" />
+              ) : (
+                <EyeOff className="h-3.5 w-3.5 text-text-muted" />
+              )}
+              <span>Employee Visibility Controls</span>
+            </p>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={modalVisibleToEmployee}
+                onChange={(e) => setModalVisibleToEmployee(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-border text-brand-600"
+              />
+              <span className="text-text-secondary">Show this follow-up on assigned employee&apos;s dashboard</span>
+            </label>
+            {modalVisibleToEmployee && (
+              <label className="flex items-center gap-2 cursor-pointer pl-5">
+                <input
+                  type="checkbox"
+                  checked={modalHideDetails}
+                  onChange={(e) => setModalHideDetails(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-border text-brand-600"
+                />
+                <span className="text-text-secondary">Hide confidential notes/details from employee</span>
+              </label>
+            )}
+          </div>
         </div>
+      </Modal>
+
+      {/* Admin Follow-up Evaluation Review Modal */}
+      <Modal
+        isOpen={!!reviewingFollowUp}
+        onClose={() => setReviewingFollowUp(null)}
+        title="Follow-up Evaluation Review"
+        description="Inspect employee call completion outcome and submit quality review."
+        size="md"
+      >
+        {reviewingFollowUp && (
+          <form onSubmit={handleSaveAdminReview} className="space-y-4 text-xs">
+            <div className="p-3.5 rounded-xl bg-surface border border-border space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-sm text-text-primary">
+                  {clientMap.get(reviewingFollowUp.clientId)?.companyName || 'Client Follow-up'}
+                </span>
+                <span className="text-text-muted">
+                  Owner: {reviewingFollowUp.assignedToName}
+                </span>
+              </div>
+
+              {reviewingFollowUp.evaluation ? (
+                <>
+                  <div className="flex items-center gap-3 pt-1">
+                    <div className="flex items-center gap-1 font-bold text-amber-600">
+                      <Star className="h-4 w-4 fill-amber-400 text-amber-500" />
+                      <span>Rating: {reviewingFollowUp.evaluation.rating} / 5</span>
+                    </div>
+                    <Badge
+                      variant={
+                        reviewingFollowUp.evaluation.properlyCompleted ? 'green' : 'amber'
+                      }
+                      size="sm"
+                    >
+                      {reviewingFollowUp.evaluation.properlyCompleted
+                        ? 'Properly Completed'
+                        : 'Incomplete / Needs Follow-up'}
+                    </Badge>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-white border border-border/80 text-text-secondary leading-relaxed">
+                    <strong className="text-text-primary block mb-0.5">
+                      Employee Evaluation Notes:
+                    </strong>
+                    {reviewingFollowUp.evaluation.comments || 'No comments entered.'}
+                  </div>
+                </>
+              ) : (
+                <p className="text-text-muted italic">
+                  No evaluation submitted by the employee yet.
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-text-primary block mb-1.5">
+                Admin Quality Decision
+              </label>
+              <select
+                value={adminReviewStatus}
+                onChange={(e) =>
+                  setAdminReviewStatus(
+                    e.target.value as 'pending' | 'approved' | 'needs_followup',
+                  )
+                }
+                className="w-full h-10 rounded-lg border border-border bg-white px-3 text-xs text-text-primary"
+              >
+                <option value="approved">Approved — Properly Completed</option>
+                <option value="needs_followup">Needs Follow-up / Re-check</option>
+                <option value="pending">Pending Verification</option>
+              </select>
+            </div>
+
+            <Textarea
+              label="Admin Review Notes (optional)"
+              placeholder="Add verification notes or instructions for next steps..."
+              value={adminReviewNotes}
+              onChange={(e) => setAdminReviewNotes(e.target.value)}
+              rows={2}
+            />
+
+            <div className="pt-2 border-t border-border flex items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setReviewingFollowUp(null)}
+              >
+                Close
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                size="sm"
+                isLoading={isSavingReview}
+              >
+                Save Review
+              </Button>
+            </div>
+          </form>
+        )}
       </Modal>
     </ContentWrapper>
   )

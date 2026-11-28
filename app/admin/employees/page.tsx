@@ -372,12 +372,19 @@ function AdminEmployeesContent() {
                             </Badge>
                           </td>
 
-                          <td className="py-3.5 px-4 text-right">
-                            <Link href={`/admin/employees/${emp.id}`}>
-                              <Button variant="secondary" size="sm">
-                                View Profile
-                              </Button>
-                            </Link>
+                          <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                            <div className="inline-flex items-center gap-1.5">
+                              <Link href={`/admin/employees/${emp.id}?tab=worksheet`}>
+                                <Button variant="ghost" size="sm">
+                                  Worksheet
+                                </Button>
+                              </Link>
+                              <Link href={`/admin/employees/${emp.id}`}>
+                                <Button variant="secondary" size="sm">
+                                  View Profile
+                                </Button>
+                              </Link>
+                            </div>
                           </td>
                         </tr>
                       )
@@ -431,10 +438,15 @@ function AdminEmployeesContent() {
                     </div>
                   </div>
 
-                  <div className="mt-3 pt-2 flex items-center justify-end">
-                    <Link href={`/admin/employees/${emp.id}`} className="w-full">
+                  <div className="mt-3 pt-2 flex items-center gap-2">
+                    <Link href={`/admin/employees/${emp.id}?tab=worksheet`} className="flex-1">
                       <Button variant="secondary" size="sm" className="w-full">
-                        View Team Member
+                        Worksheet
+                      </Button>
+                    </Link>
+                    <Link href={`/admin/employees/${emp.id}`} className="flex-1">
+                      <Button variant="primary" size="sm" className="w-full">
+                        Profile
                       </Button>
                     </Link>
                   </div>

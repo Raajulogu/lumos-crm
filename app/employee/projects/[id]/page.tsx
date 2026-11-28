@@ -4,7 +4,7 @@
 // Employee Project Workspace — task execution, status updates, raise doubt Q&A with admin, and notes.
 
 import { useState, useMemo, useEffect, Suspense } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { ContentWrapper } from '@/components/layout/ContentWrapper'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -25,30 +25,21 @@ import { ProjectPipelineStepper } from '@/components/common'
 import { api } from '@/lib/api'
 import type {
   Project,
-  Client,
   Doubt,
   Note,
   ServiceCategory,
   ProjectStatus,
-  ProjectPriority,
   DoubtPriority,
   ProjectTask,
   TaskPunch,
 } from '@/lib/types'
 import {
-  Briefcase,
   Building2,
-  Calendar,
   Clock,
-  AlertTriangle,
-  MessageCircle,
   ArrowLeft,
   Plus,
-  Send,
-  Check,
   HelpCircle,
   CheckCircle2,
-  AlertCircle,
   Play,
   Square,
   History,
@@ -80,7 +71,6 @@ function EmployeeProjectDetailContent() {
   const { currentUser } = useAuth()
   const { activePunch, startTaskTimer, openStopModal } = useTaskTimer()
   const params = useParams()
-  const router = useRouter()
   const projectId = params?.id as string
 
   const currentEmpId = currentUser.id || ''
@@ -110,7 +100,6 @@ function EmployeeProjectDetailContent() {
 
   useEffect(() => {
     let mounted = true
-    setLoading(true)
 
     Promise.allSettled([
       api.projects.getById(projectId),
@@ -166,6 +155,19 @@ function EmployeeProjectDetailContent() {
   }
 
   const categoryMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
+
+  const myTasks = useMemo(() => {
+    return projectTasks.filter((t) => {
+      if (currentUser.role === 'admin') return true
+      const ids =
+        Array.isArray(t.assigneeIds) && t.assigneeIds.length > 0
+          ? t.assigneeIds
+          : t.assignedToId
+          ? [t.assignedToId]
+          : []
+      return ids.length === 0 || ids.includes(currentEmpId)
+    })
+  }, [projectTasks, currentEmpId, currentUser.role])
 
   if (loading) {
     return (
@@ -270,9 +272,14 @@ function EmployeeProjectDetailContent() {
     } catch {}
   }
 
-  const client = (project as any)?.client || {
-    companyName: (project as any)?.clientName || 'Client Account',
-    fullName: (project as any)?.contactName || 'Client Contact',
+  const extendedProj = project as Project & {
+    client?: { companyName?: string; fullName?: string }
+    clientName?: string
+    contactName?: string
+  }
+  const client = extendedProj?.client || {
+    companyName: extendedProj?.clientName || 'Client Account',
+    fullName: extendedProj?.contactName || 'Client Contact',
   }
 
   const isLate = isOverdue(project.deliveryDate, project.status)
@@ -280,12 +287,6 @@ function EmployeeProjectDetailContent() {
   const myDoubtsCount = Array.isArray(projectDoubts)
     ? projectDoubts.filter((d) => d && d.status === 'open').length
     : 0
-
-  const myTasks = useMemo(() => {
-    return projectTasks.filter(
-      (t) => !t.assignedToId || t.assignedToId === currentEmpId || currentUser.role === 'admin',
-    )
-  }, [projectTasks, currentEmpId, currentUser.role])
 
   const tabs = [
     { id: 'tasks', label: 'My Assigned Tasks', count: myTasks.length },
@@ -492,7 +493,7 @@ function EmployeeProjectDetailContent() {
                         </span>
                       </div>
 
-                      <div className="flex items-center gap-2 mb-3 text-xs text-text-muted">
+                      <div className="flex flex-wrap items-center gap-2 mb-3 text-xs text-text-muted">
                         <span
                           className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${getPriorityColor(
                             task.priority,
@@ -501,12 +502,16 @@ function EmployeeProjectDetailContent() {
                           {getPriorityLabel(task.priority)}
                         </span>
 
+                        <span suppressHydrationWarning>
+                          Started: {formatDate(task.startDate || task.createdAt)}
+                        </span>
+
                         {task.dueDate && (
                           <span
                             suppressHydrationWarning
                             className={isTaskLate ? 'text-danger font-semibold' : ''}
                           >
-                            Due: {formatDate(task.dueDate)}
+                            • Due: {formatDate(task.dueDate)}
                           </span>
                         )}
 
@@ -579,18 +584,23 @@ function EmployeeProjectDetailContent() {
               Required Services
             </h4>
             <div className="flex flex-wrap gap-2">
-              {Array.isArray(project.serviceCategories) && project.serviceCategories.map((catItem: any) => {
-                const catId = typeof catItem === 'object' && catItem !== null ? catItem.id || catItem._id : catItem
-                const cat = typeof catItem === 'object' && catItem !== null ? catItem : categoryMap.get(catId)
-                return (
-                  <span
-                    key={catId}
-                    className="px-3 py-1 rounded-lg bg-brand-50 border border-brand-200 text-xs font-medium text-brand-700"
-                  >
-                    {cat?.name || (typeof catItem === 'string' ? catItem : 'Service')}
-                  </span>
-                )
-              })}
+              {Array.isArray(project.serviceCategories) &&
+                project.serviceCategories.map((catItem: unknown) => {
+                  const catObj =
+                    typeof catItem === 'object' && catItem !== null
+                      ? (catItem as { id?: string; _id?: string; name?: string })
+                      : null
+                  const catId = catObj ? catObj.id || catObj._id || '' : String(catItem)
+                  const cat = catObj || categoryMap.get(catId)
+                  return (
+                    <span
+                      key={catId}
+                      className="px-3 py-1 rounded-lg bg-brand-50 border border-brand-200 text-xs font-medium text-brand-700"
+                    >
+                      {cat?.name || (typeof catItem === 'string' ? catItem : 'Service')}
+                    </span>
+                  )
+                })}
             </div>
           </div>
         </Card>

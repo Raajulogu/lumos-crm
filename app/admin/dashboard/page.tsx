@@ -26,6 +26,8 @@ import type {
   FollowUp,
   Doubt,
   AppNotification,
+  LeaveRequest,
+  PermissionRequest,
 } from '@/lib/types'
 import {
   AlertTriangle,
@@ -38,7 +40,8 @@ import {
   Clock,
   CheckCircle2,
   AlertCircle,
-  FolderOpen,
+  CalendarOff,
+  FileCheck,
 } from 'lucide-react'
 import {
   formatDate,
@@ -70,11 +73,11 @@ function AdminDashboardContent() {
   const [followups, setFollowups] = useState<FollowUp[]>([])
   const [doubts, setDoubts] = useState<Doubt[]>([])
   const [notifications, setNotifications] = useState<AppNotification[]>([])
+  const [pendingLeaves, setPendingLeaves] = useState<LeaveRequest[]>([])
+  const [pendingPermissions, setPendingPermissions] = useState<PermissionRequest[]>([])
 
   useEffect(() => {
     let mounted = true
-    setLoading(true)
-    setError(null)
 
     Promise.allSettled([
       api.projects.list({ limit: 100 }),
@@ -82,8 +85,10 @@ function AdminDashboardContent() {
       api.employees.list(),
       api.followups.list({ limit: 50 }),
       api.notifications.list(),
+      api.hrms.getLeaves({ status: 'pending' }),
+      api.hrms.getPermissions({ status: 'pending' }),
     ])
-      .then(([projRes, clientRes, empRes, fuRes, notifRes]) => {
+      .then(([projRes, clientRes, empRes, fuRes, notifRes, leaveRes, permRes]) => {
         if (!mounted) return
 
         if (projRes.status === 'fulfilled') {
@@ -102,6 +107,12 @@ function AdminDashboardContent() {
         }
         if (notifRes.status === 'fulfilled') {
           setNotifications(notifRes.value || [])
+        }
+        if (leaveRes.status === 'fulfilled') {
+          setPendingLeaves(leaveRes.value || [])
+        }
+        if (permRes.status === 'fulfilled') {
+          setPendingPermissions(permRes.value || [])
         }
       })
       .catch((err) => {
@@ -452,8 +463,101 @@ function AdminDashboardContent() {
           </Card>
         </div>
 
-        {/* Right Column: Follow-ups & Recent Notifications */}
+        {/* Right Column: HRMS Approvals, Follow-ups & Recent Notifications */}
         <div className="space-y-6">
+          {/* Pending Leave & Permission Requests */}
+          <Card padding="md">
+            <CardHeader
+              title="Leave & Permission Approvals"
+              description="Pending staff HRMS requests"
+              action={
+                <Link
+                  href="/admin/hrms"
+                  className="text-xs text-brand-600 hover:text-brand-700 font-medium inline-flex items-center gap-1"
+                >
+                  Open HRMS <ArrowRight className="h-3 w-3" />
+                </Link>
+              }
+            />
+
+            {loading ? (
+              <CardSkeleton rows={2} />
+            ) : pendingLeaves.length === 0 && pendingPermissions.length === 0 ? (
+              <div className="py-6 text-center text-xs text-text-muted">
+                <CalendarOff className="h-7 w-7 text-slate-300 mx-auto mb-2" />
+                <p className="font-medium text-text-primary">All HRMS Requests Reviewed</p>
+                <p className="mt-0.5">No pending leave or permission applications right now.</p>
+              </div>
+            ) : (
+              <div className="space-y-2.5 text-xs">
+                {pendingLeaves.slice(0, 3).map((l) => {
+                  const empName =
+                    l.employeeName || employeeMap.get(l.userId)?.fullName || 'Team Member'
+                  return (
+                    <div
+                      key={l.id}
+                      className="p-2.5 rounded-lg border border-amber-200/80 bg-amber-50/40 space-y-1"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold text-text-primary inline-flex items-center gap-1.5">
+                          <CalendarOff className="h-3.5 w-3.5 text-amber-600" />
+                          <span>{empName}</span>
+                        </span>
+                        <Badge variant="amber" size="sm">
+                          Leave
+                        </Badge>
+                      </div>
+                      <p className="text-[11px] text-text-secondary capitalize">
+                        {l.type} Leave • {formatDate(l.startDate)} – {formatDate(l.endDate)}
+                      </p>
+                      <div className="flex justify-end pt-1">
+                        <Link
+                          href="/admin/hrms?tab=leaves"
+                          className="text-[11px] font-semibold text-brand-600 hover:underline"
+                        >
+                          Review & Approve →
+                        </Link>
+                      </div>
+                    </div>
+                  )
+                })}
+
+                {pendingPermissions.slice(0, 2).map((p) => {
+                  const empName =
+                    p.employeeName || employeeMap.get(p.userId)?.fullName || 'Team Member'
+                  return (
+                    <div
+                      key={p.id}
+                      className="p-2.5 rounded-lg border border-border bg-surface space-y-1"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold text-text-primary inline-flex items-center gap-1.5">
+                          <FileCheck className="h-3.5 w-3.5 text-brand-600" />
+                          <span>{empName}</span>
+                        </span>
+                        <Badge variant="blue" size="sm">
+                          Permission
+                        </Badge>
+                      </div>
+                      <p className="text-[11px] text-text-secondary">
+                        {formatDate(p.date)}
+                        {p.fromTime ? ` • ${p.fromTime}–${p.toTime || ''}` : ''}
+                      </p>
+                      <div className="flex justify-end pt-1">
+                        <Link
+                          href="/admin/hrms?tab=permissions"
+                          className="text-[11px] font-semibold text-brand-600 hover:underline"
+                        >
+                          Review & Approve →
+                        </Link>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </Card>
+
           {/* Scheduled Client Follow-ups */}
           <Card padding="md">
             <CardHeader

@@ -4,7 +4,7 @@
 // Client Detail Page — full client 360 overview with project history, financial totals, follow-ups, and notes.
 
 import { useState, useEffect, Suspense } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { ContentWrapper } from '@/components/layout/ContentWrapper'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -27,15 +27,11 @@ import {
   Mail,
   Phone,
   MapPin,
-  Calendar,
-  Briefcase,
   Plus,
-  CheckCircle2,
-  Clock,
   ArrowLeft,
   ChevronRight,
   TrendingUp,
-  AlertCircle,
+  Pencil,
 } from 'lucide-react'
 import {
   formatDate,
@@ -58,7 +54,6 @@ export default function ClientDetailPage() {
 
 function ClientDetailContent() {
   const params = useParams()
-  const router = useRouter()
   const clientId = params?.id as string
 
   const [loading, setLoading] = useState(true)
@@ -81,7 +76,6 @@ function ClientDetailContent() {
 
   useEffect(() => {
     let mounted = true
-    setLoading(true)
 
     Promise.allSettled([
       api.clients.getById(clientId),
@@ -513,6 +507,14 @@ function ClientDetailContent() {
             <CardHeader
               title="Company Details"
               description="Primary point of contact & location"
+              action={
+                <Link href={`/admin/clients/${client.id}/edit`}>
+                  <Button variant="secondary" size="sm">
+                    <Pencil className="h-3.5 w-3.5" />
+                    <span>Edit</span>
+                  </Button>
+                </Link>
+              }
             />
 
             <div className="space-y-4 text-xs">

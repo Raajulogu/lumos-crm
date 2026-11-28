@@ -8,24 +8,18 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { ContentWrapper } from '@/components/layout/ContentWrapper'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { Card, Input, Textarea, Button, Badge, PageLoader } from '@/components/ui'
+import { Card, Input, Textarea, Button, Badge, Modal, PageLoader } from '@/components/ui'
 import { api } from '@/lib/api'
 import type { Client, Employee, ServiceCategory, ProjectPriority } from '@/lib/types'
 import { formatCurrency } from '@/lib/utils'
 import {
   Briefcase,
-  Building2,
-  Calendar,
-  Clock,
-  User,
-  Users,
   IndianRupee,
   Plus,
   X,
   ArrowLeft,
   Check,
   Bell,
-  AlertCircle,
 } from 'lucide-react'
 
 export default function NewProjectPage() {
@@ -48,7 +42,6 @@ function NewProjectForm() {
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   useEffect(() => {
-    setStartDate(new Date().toISOString().split('T')[0])
     Promise.allSettled([
       api.clients.list({ limit: 100 }),
       api.employees.list(),
@@ -67,7 +60,7 @@ function NewProjectForm() {
   const [description, setDescription] = useState('')
   const [budget, setBudget] = useState('')
   const [actualCost, setActualCost] = useState('')
-  const [startDate, setStartDate] = useState('')
+  const [startDate, setStartDate] = useState(() => new Date().toISOString().split('T')[0])
   const [deliveryDate, setDeliveryDate] = useState('')
   const [priority, setPriority] = useState<ProjectPriority>('medium')
   const [primaryEmployeeId, setPrimaryEmployeeId] = useState('')
@@ -76,6 +69,48 @@ function NewProjectForm() {
   // Initial Project Tasks setup
   const [initialTasks, setInitialTasks] = useState<string[]>([])
   const [taskInput, setTaskInput] = useState('')
+
+  // Add Service Category Modal state
+  const [isAddServiceModalOpen, setIsAddServiceModalOpen] = useState(false)
+  const [newServiceName, setNewServiceName] = useState('')
+  const [newServiceDesc, setNewServiceDesc] = useState('')
+  const [newServiceColor, setNewServiceColor] = useState('#3b82f6')
+  const [serviceError, setServiceError] = useState('')
+  const [isSavingService, setIsSavingService] = useState(false)
+
+  async function handleCreateServiceCategory(e: React.FormEvent) {
+    e.preventDefault()
+    setServiceError('')
+    const trimmed = newServiceName.trim()
+    if (!trimmed) {
+      setServiceError('Service category name is required.')
+      return
+    }
+    if (categories.some((c) => c.name.toLowerCase() === trimmed.toLowerCase())) {
+      setServiceError('This service category already exists.')
+      return
+    }
+
+    setIsSavingService(true)
+    try {
+      const created = await api.settings.createCategory({
+        name: trimmed,
+        description: newServiceDesc.trim() || undefined,
+        color: newServiceColor,
+      })
+      setCategories((prev) => [...prev, created])
+      setSelectedCategories((prev) => [...prev, created.id])
+      setNewServiceName('')
+      setNewServiceDesc('')
+      setIsAddServiceModalOpen(false)
+    } catch (err: unknown) {
+      setServiceError(
+        err instanceof Error ? err.message : 'Failed to create service category.',
+      )
+    } finally {
+      setIsSavingService(false)
+    }
+  }
 
   function addInitialTask() {
     if (!taskInput.trim()) return
@@ -190,8 +225,10 @@ function NewProjectForm() {
       }
 
       router.push(`/admin/projects/${projId}`)
-    } catch (err: any) {
-      setServerError(err?.message || 'Failed to create project on backend server.')
+    } catch (err: unknown) {
+      setServerError(
+        err instanceof Error ? err.message : 'Failed to create project on backend server.',
+      )
     } finally {
       setIsSubmitting(false)
     }
@@ -297,7 +334,7 @@ function NewProjectForm() {
                       key={cat.id}
                       type="button"
                       onClick={() => toggleCategory(cat.id)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
                         isSelected
                           ? 'bg-brand-600 text-white shadow-sm ring-2 ring-brand-500 ring-offset-1'
                           : 'bg-white border border-border text-text-secondary hover:bg-surface'
@@ -307,6 +344,18 @@ function NewProjectForm() {
                     </button>
                   )
                 })}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setServiceError('')
+                    setIsAddServiceModalOpen(true)
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-50 text-brand-700 border border-dashed border-brand-400 hover:bg-brand-100 transition-colors cursor-pointer"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>Add Service</span>
+                </button>
               </div>
               {errors.categories && (
                 <p className="text-xs text-danger mt-1.5">{errors.categories}</p>
@@ -610,6 +659,85 @@ function NewProjectForm() {
           </div>
         </Card>
       </form>
+
+      {/* Add Service Category Modal */}
+      <Modal
+        isOpen={isAddServiceModalOpen}
+        onClose={() => {
+          if (!isSavingService) setIsAddServiceModalOpen(false)
+        }}
+        title="Add New Service Category"
+        description="Create a reusable digital marketing service category for this and future projects."
+        size="sm"
+      >
+        <form onSubmit={handleCreateServiceCategory} className="space-y-4">
+          <Input
+            label="Service Category Name"
+            placeholder="e.g. Video Production, Influencer Marketing"
+            value={newServiceName}
+            onChange={(e) => {
+              setNewServiceName(e.target.value)
+              setServiceError('')
+            }}
+            error={serviceError}
+            required
+            autoFocus
+          />
+
+          <Textarea
+            label="Description (optional)"
+            placeholder="Brief scope notes for this service offering..."
+            value={newServiceDesc}
+            onChange={(e) => setNewServiceDesc(e.target.value)}
+            rows={2}
+          />
+
+          <div>
+            <label className="text-xs font-medium text-text-primary block mb-1.5">
+              Color Accent
+            </label>
+            <div className="flex items-center gap-2">
+              {['#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444', '#22c55e', '#06b6d4', '#ec4899'].map(
+                (color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    onClick={() => setNewServiceColor(color)}
+                    className={`h-6 w-6 rounded-full cursor-pointer transition-transform ${
+                      newServiceColor === color
+                        ? 'scale-110 ring-2 ring-brand-500 ring-offset-2'
+                        : 'opacity-75 hover:opacity-100'
+                    }`}
+                    style={{ backgroundColor: color }}
+                    aria-label={`Select color ${color}`}
+                  />
+                ),
+              )}
+            </div>
+          </div>
+
+          <div className="pt-2 border-t border-border flex items-center justify-end gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setIsAddServiceModalOpen(false)}
+              disabled={isSavingService}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              isLoading={isSavingService}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>Save Service</span>
+            </Button>
+          </div>
+        </form>
+      </Modal>
     </ContentWrapper>
   )
 }

@@ -1,7 +1,7 @@
 'use client'
 
 // app/employee/followups/page.tsx
-// Employee Follow-ups — Connected to live backend API with skeletons and 0-data screen.
+// Employee Follow-ups — Visibility-controlled follow-ups with call completion & evaluation modal.
 
 import { useState, useMemo, useEffect, Suspense } from 'react'
 import { ContentWrapper } from '@/components/layout/ContentWrapper'
@@ -14,15 +14,28 @@ import {
   PageLoader,
   TableSkeleton,
 } from '@/components/ui'
-import { SearchBar, FilterBar, Pagination } from '@/components/common'
+import {
+  SearchBar,
+  FilterBar,
+  Pagination,
+  FollowUpEvaluationModal,
+} from '@/components/common'
 import { api } from '@/lib/api'
-import type { FollowUp, Client, Project, FollowUpStatus } from '@/lib/types'
+import type {
+  FollowUp,
+  FollowUpEvaluation,
+  Client,
+  Project,
+  FollowUpStatus,
+} from '@/lib/types'
 import { useAuth } from '@/lib/auth-context'
 import {
   Phone,
   Check,
   RotateCcw,
   AlertCircle,
+  Star,
+  Lock,
 } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
 
@@ -48,10 +61,10 @@ function EmployeeFollowUpsContent() {
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 8
 
+  const [evaluatingItem, setEvaluatingItem] = useState<FollowUp | null>(null)
+
   useEffect(() => {
     let mounted = true
-    setLoading(true)
-    setError(null)
 
     Promise.allSettled([
       api.followups.list({ limit: 100 }),
@@ -62,8 +75,7 @@ function EmployeeFollowUpsContent() {
         if (!mounted) return
 
         if (fuRes.status === 'fulfilled') {
-          const allFu = fuRes.value?.followups || []
-          setFollowups(allFu)
+          setFollowups(fuRes.value?.followups || [])
         } else {
           setError('Failed to fetch follow-ups from backend server')
         }
@@ -89,43 +101,67 @@ function EmployeeFollowUpsContent() {
   const clientMap = useMemo(
     () =>
       new Map(
-        (Array.isArray(clients) ? clients : []).map((c) => [c.id || (c as any)._id, { name: c.fullName, company: c.companyName }]),
+        (Array.isArray(clients) ? clients : []).map((c) => [
+          c.id || (c as unknown as { _id?: string })._id || '',
+          { name: c.fullName, company: c.companyName },
+        ]),
       ),
     [clients],
   )
   const projectMap = useMemo(
-    () => new Map((Array.isArray(projects) ? projects : []).map((p) => [p.id || (p as any)._id, p])),
+    () =>
+      new Map(
+        (Array.isArray(projects) ? projects : []).map((p) => [
+          p.id || (p as unknown as { _id?: string })._id || '',
+          p,
+        ]),
+      ),
     [projects],
   )
 
-  // Assigned follow-ups from backend
+  // Assigned follow-ups respecting Admin visibility controls
   const myFollowups = useMemo(() => {
-    return Array.isArray(followups) ? followups : []
-  }, [followups])
+    if (!Array.isArray(followups)) return []
+    return followups.filter((item) => {
+      if (item.isVisibleToEmployee === false) return false
+      if (currentUser.role !== 'admin' && currentUser.id && item.assignedToId) {
+        return item.assignedToId === currentUser.id
+      }
+      return true
+    })
+  }, [followups, currentUser.id, currentUser.role])
 
-  async function toggleStatus(id: string) {
-    const fu = myFollowups.find((f) => (f.id || (f as any)._id) === id)
-    if (!fu) return
-
-    const nextStatus: FollowUpStatus = fu.status === 'done' ? 'pending' : 'done'
+  async function reopenFollowup(id: string) {
+    const nextStatus: FollowUpStatus = 'pending'
     setFollowups((prev) =>
-      prev.map((item) => ((item.id || (item as any)._id) === id ? { ...item, status: nextStatus } : item)),
+      prev.map((item) => (item.id === id ? { ...item, status: nextStatus } : item)),
     )
-
     try {
       await api.followups.updateStatus(id, nextStatus)
     } catch {}
   }
 
+  function handleEvaluationSubmitted(followupId: string, evaluation: FollowUpEvaluation) {
+    setFollowups((prev) =>
+      prev.map((item) =>
+        item.id === followupId ? { ...item, status: 'done', evaluation } : item,
+      ),
+    )
+  }
+
   const filteredFollowups = useMemo(() => {
     return myFollowups.filter((item) => {
-      const client = (item as any).client || clientMap.get(item.clientId)
-      const proj = (item as any).project || projectMap.get(item.projectId)
+      const client = (item as unknown as { client?: { company?: string; companyName?: string } }).client || clientMap.get(item.clientId)
+      const proj = (item as unknown as { project?: { name?: string } }).project || projectMap.get(item.projectId)
       const query = (search || '').toLowerCase()
 
-      const companyName = client?.company || client?.companyName || (item as any).clientName || ''
-      const projectName = proj?.name || (item as any).projectName || ''
-      const notes = item.notes || ''
+      const companyName =
+        (client as { company?: string; companyName?: string })?.company ||
+        (client as { companyName?: string })?.companyName ||
+        (item as unknown as { clientName?: string }).clientName ||
+        ''
+      const projectName = proj?.name || (item as unknown as { projectName?: string }).projectName || ''
+      const notes = item.hideDetailsFromEmployee ? '' : item.notes || ''
 
       const matchesSearch =
         companyName.toLowerCase().includes(query) ||
@@ -156,7 +192,6 @@ function EmployeeFollowUpsContent() {
     { id: 'done', label: 'Completed', count: doneCount },
   ]
 
-  // Pagination
   const totalPages = Math.ceil(filteredFollowups.length / itemsPerPage)
   const paginatedFollowups = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage
@@ -167,7 +202,7 @@ function EmployeeFollowUpsContent() {
     <ContentWrapper>
       <PageHeader
         title="My Client Follow-ups"
-        description="Calls, scheduled check-ins, and reminders assigned to your client accounts."
+        description="Calls, scheduled check-ins, and completion evaluations assigned to your client accounts."
       />
 
       {error && (
@@ -194,7 +229,7 @@ function EmployeeFollowUpsContent() {
             setSearch(val)
             setCurrentPage(1)
           }}
-          placeholder="Search by client or notes..."
+          placeholder="Search by client or project..."
           className="w-full sm:max-w-xs"
         />
 
@@ -212,7 +247,6 @@ function EmployeeFollowUpsContent() {
       {loading ? (
         <TableSkeleton rows={6} cols={4} />
       ) : paginatedFollowups.length === 0 ? (
-        /* 0 Screen / Empty State */
         <Card padding="lg">
           <EmptyState
             icon={<Phone className="h-10 w-10 text-slate-300 mx-auto" />}
@@ -220,7 +254,7 @@ function EmployeeFollowUpsContent() {
             description={
               search
                 ? `No calls matched "${search}". Try another keyword.`
-                : 'All client check-ins are up to date! You have no pending calls.'
+                : 'All client check-ins assigned to you are up to date.'
             }
           />
         </Card>
@@ -231,6 +265,7 @@ function EmployeeFollowUpsContent() {
             {paginatedFollowups.map((item) => {
               const client = clientMap.get(item.clientId)
               const proj = projectMap.get(item.projectId)
+              const hideNotes = item.hideDetailsFromEmployee === true
 
               return (
                 <Card key={item.id} padding="md">
@@ -252,34 +287,66 @@ function EmployeeFollowUpsContent() {
                     </Badge>
                   </div>
 
-                  {item.notes && (
-                    <div className="mt-2.5 p-2 bg-surface rounded-lg text-xs text-text-secondary leading-relaxed border border-border/60">
-                      {item.notes}
+                  {hideNotes ? (
+                    <div className="mt-2.5 p-2 bg-surface rounded-lg text-xs text-text-muted italic border border-border/60 flex items-center gap-1.5">
+                      <Lock className="h-3.5 w-3.5" />
+                      <span>Call details restricted by Admin</span>
+                    </div>
+                  ) : (
+                    item.notes && (
+                      <div className="mt-2.5 p-2 bg-surface rounded-lg text-xs text-text-secondary leading-relaxed border border-border/60">
+                        {item.notes}
+                      </div>
+                    )
+                  )}
+
+                  {item.evaluation && (
+                    <div className="mt-2 p-2 rounded-lg bg-brand-50 border border-brand-200 text-[11px] flex items-center justify-between">
+                      <span className="font-semibold text-brand-800 flex items-center gap-1">
+                        <Star className="h-3 w-3 fill-amber-400 text-amber-500" />
+                        Evaluated: {item.evaluation.rating}/5
+                      </span>
+                      <span className="text-brand-700">
+                        {item.evaluation.properlyCompleted ? 'Properly Completed' : 'Needs Follow-up'}
+                      </span>
                     </div>
                   )}
 
-                  <div className="mt-3 pt-3 border-t border-border flex items-center justify-between text-xs">
+                  <div className="mt-3 pt-3 border-t border-border flex items-center justify-between gap-2 text-xs">
                     <span className="text-text-muted">
                       {formatDateTime(item.scheduledAt)}
                     </span>
 
-                    <Button
-                      variant={item.status === 'done' ? 'ghost' : 'secondary'}
-                      size="sm"
-                      onClick={() => toggleStatus(item.id)}
-                    >
+                    <div className="flex items-center gap-1.5">
                       {item.status === 'done' ? (
                         <>
-                          <RotateCcw className="h-3.5 w-3.5 mr-1" />
-                          Reopen
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => setEvaluatingItem(item)}
+                          >
+                            {item.evaluation ? 'Edit Eval' : 'Evaluate'}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => reopenFollowup(item.id)}
+                          >
+                            <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                            Reopen
+                          </Button>
                         </>
                       ) : (
-                        <>
-                          <Check className="h-3.5 w-3.5 mr-1 text-success" />
-                          Mark Done
-                        </>
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={() => setEvaluatingItem(item)}
+                        >
+                          <Check className="h-3.5 w-3.5 mr-1" />
+                          Done & Evaluate
+                        </Button>
                       )}
-                    </Button>
+                    </div>
                   </div>
                 </Card>
               )
@@ -295,6 +362,7 @@ function EmployeeFollowUpsContent() {
                     <th className="py-3 px-4">Client & Project</th>
                     <th className="py-3 px-4">Notes / Purpose</th>
                     <th className="py-3 px-4">Scheduled Date & Time</th>
+                    <th className="py-3 px-4">Evaluation</th>
                     <th className="py-3 px-4">Status</th>
                     <th className="py-3 px-4 text-right">Action</th>
                   </tr>
@@ -303,6 +371,7 @@ function EmployeeFollowUpsContent() {
                   {paginatedFollowups.map((item) => {
                     const client = clientMap.get(item.clientId)
                     const proj = projectMap.get(item.projectId)
+                    const hideNotes = item.hideDetailsFromEmployee === true
 
                     return (
                       <tr
@@ -318,14 +387,41 @@ function EmployeeFollowUpsContent() {
                           </span>
                         </td>
 
-                        <td className="py-3.5 px-4 max-w-[280px]">
-                          <p className="text-text-secondary line-clamp-2">
-                            {item.notes || 'Routine check-in'}
-                          </p>
+                        <td className="py-3.5 px-4 max-w-[260px]">
+                          {hideNotes ? (
+                            <span className="inline-flex items-center gap-1 text-text-muted italic">
+                              <Lock className="h-3 w-3" />
+                              Details hidden by Admin
+                            </span>
+                          ) : (
+                            <p className="text-text-secondary line-clamp-2">
+                              {item.notes || 'Routine check-in'}
+                            </p>
+                          )}
                         </td>
 
                         <td className="py-3.5 px-4 font-medium text-text-primary whitespace-nowrap">
                           {formatDateTime(item.scheduledAt)}
+                        </td>
+
+                        <td className="py-3.5 px-4">
+                          {item.evaluation ? (
+                            <div className="space-y-0.5">
+                              <span className="inline-flex items-center gap-1 font-semibold text-brand-700">
+                                <Star className="h-3 w-3 fill-amber-400 text-amber-500" />
+                                {item.evaluation.rating}/5 •{' '}
+                                {item.evaluation.properlyCompleted ? 'Verified' : 'Partial'}
+                              </span>
+                              {item.evaluation.adminReviewStatus &&
+                                item.evaluation.adminReviewStatus !== 'pending' && (
+                                  <p className="text-[10px] text-text-muted capitalize">
+                                    Admin: {item.evaluation.adminReviewStatus.replace('_', ' ')}
+                                  </p>
+                                )}
+                            </div>
+                          ) : (
+                            <span className="text-text-muted">Not evaluated</span>
+                          )}
                         </td>
 
                         <td className="py-3.5 px-4">
@@ -337,24 +433,37 @@ function EmployeeFollowUpsContent() {
                           </Badge>
                         </td>
 
-                        <td className="py-3.5 px-4 text-right">
-                          <Button
-                            variant={item.status === 'done' ? 'ghost' : 'secondary'}
-                            size="sm"
-                            onClick={() => toggleStatus(item.id)}
-                          >
+                        <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                          <div className="inline-flex items-center gap-1.5">
                             {item.status === 'done' ? (
                               <>
-                                <RotateCcw className="h-3.5 w-3.5 mr-1" />
-                                Reopen
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() => setEvaluatingItem(item)}
+                                >
+                                  {item.evaluation ? 'Edit Evaluation' : 'Evaluate'}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => reopenFollowup(item.id)}
+                                >
+                                  <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                                  Reopen
+                                </Button>
                               </>
                             ) : (
-                              <>
-                                <Check className="h-3.5 w-3.5 mr-1 text-success" />
-                                Mark Done
-                              </>
+                              <Button
+                                variant="primary"
+                                size="sm"
+                                onClick={() => setEvaluatingItem(item)}
+                              >
+                                <Check className="h-3.5 w-3.5 mr-1" />
+                                Mark Done & Evaluate
+                              </Button>
                             )}
-                          </Button>
+                          </div>
                         </td>
                       </tr>
                     )
@@ -375,6 +484,18 @@ function EmployeeFollowUpsContent() {
             </div>
           )}
         </div>
+      )}
+
+      {/* Evaluation Modal */}
+      {evaluatingItem && (
+        <FollowUpEvaluationModal
+          followUp={evaluatingItem}
+          clientCompanyName={clientMap.get(evaluatingItem.clientId)?.company}
+          employeeName={currentUser.fullName}
+          isOpen={!!evaluatingItem}
+          onClose={() => setEvaluatingItem(null)}
+          onSubmitted={handleEvaluationSubmitted}
+        />
       )}
     </ContentWrapper>
   )
